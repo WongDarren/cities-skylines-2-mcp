@@ -183,6 +183,7 @@ namespace CS2MCP
                 || path.EndsWith("/set", StringComparison.Ordinal)
                 || path == "/game/save"
                 || path == "/city/tiles/buy"
+                || path == "/city/devtree/purchase"
                 || path == "/transit/stops/place"
                 || path == "/transit/lines/create"
                 || path == "/transit/lines/delete";

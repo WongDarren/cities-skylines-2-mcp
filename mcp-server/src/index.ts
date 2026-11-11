@@ -22,7 +22,7 @@ function isMutatingPath(path: string): boolean {
     path.startsWith("/build/") ||
     path.startsWith("/sim/") ||
     path.endsWith("/set") ||
-    ["/game/save", "/city/tiles/buy", "/transit/stops/place", "/transit/lines/create", "/transit/lines/delete"].includes(path)
+    ["/game/save", "/city/tiles/buy", "/city/devtree/purchase", "/transit/stops/place", "/transit/lines/create", "/transit/lines/delete"].includes(path)
   );
 }
 
@@ -310,6 +310,37 @@ server.registerTool(
 );
 
 registerJsonTool(
+  "cs2_dev_tree",
+  "List the development tree",
+  "The development (progression) tree: available development points and every node with its service, " +
+    "point cost, whether it is purchased, whether its service is unlocked, its prerequisite nodes and " +
+    "whether it is affordable right now. Buy nodes with cs2_buy_dev_node.",
+  "/city/devtree",
+);
+
+server.registerTool(
+  "cs2_buy_dev_node",
+  {
+    title: "Buy a development tree node",
+    description:
+      "Spend development points on one node of the development tree (by name from cs2_dev_tree), the same " +
+      "as clicking it in the game's Progression panel. The game checks points and prerequisites; compare " +
+      "pointsBefore/pointsAfter or re-list cs2_dev_tree to confirm.",
+    inputSchema: {
+      name: z.string().describe("Node name from cs2_dev_tree"),
+    },
+  },
+  async ({ name }) => {
+    const params = new URLSearchParams({ name });
+    try {
+      return jsonResult(await bridgeJson(`/city/devtree/purchase?${bridgeQueryString(params)}`));
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+registerJsonTool(
   "cs2_policies",
   "List city policies",
   "All city-wide policies with their internal name, localized title, active state, locked state and " +
@@ -540,18 +571,22 @@ server.registerTool(
     title: "Upgrade a road segment",
     description:
       "Apply upgrades to an existing road segment (from cs2_list_roads): grass, trees, wideSidewalk, " +
-      "soundBarrier, parking, lighting, medianGrass, medianTrees. Combine multiple with commas. " +
+      "soundBarrier, parking, lighting, medianGrass, medianTrees, tram (tram tracks in the road: " +
+      "side=both for a double track, left/right for one; needs a road type that supports trams). " +
+      "Combine multiple with commas; upgrades the segment already has are kept. " +
       "The segment is recreated with the new composition via the game's tool pipeline.",
     inputSchema: {
       index: z.number().int().describe("Road segment entity index"),
       version: z.number().int().describe("Road segment entity version"),
       upgrades: z.string().describe("Comma-separated upgrade names, e.g. 'grass,lighting'"),
       side: z.enum(["both", "left", "right"]).optional().describe("Which side for side upgrades (default both)"),
+      remove: z.boolean().optional().describe("true to remove these upgrades instead of adding them (e.g. the wrong-way tram track on a one-way road)"),
     },
   },
-  async ({ index, version, upgrades, side }) => {
+  async ({ index, version, upgrades, side, remove }) => {
     const params = new URLSearchParams({ index: String(index), version: String(version), upgrades });
     if (side) params.set("side", side);
+    if (remove) params.set("remove", "true");
     try {
       return jsonResult(await bridgeJson(`/build/upgrade?${bridgeQueryString(params)}`, 15_000));
     } catch (err) {
@@ -1317,7 +1352,8 @@ server.registerTool(
     description:
       "Road segments in an area with their junction ids (so you can see what connects to what), direction " +
       "(one-way roads run start to end), flow and volume, plus each junction's position, number of roads and " +
-      "whether it has traffic lights or is a roundabout. Use it to plan road changes before cs2_replace_road, " +
+      "whether it has traffic lights or is a roundabout. Each segment carries its street name as the game shows it " +
+      "(e.g. 'Rosecliff Street'); filter by it with street. Use it to plan road changes before cs2_replace_road, " +
       "cs2_build_road or cs2_demolish.",
     inputSchema: {
       x: z.number().describe("Center X"),
@@ -1325,17 +1361,19 @@ server.registerTool(
       radius: z.number().min(1).max(2000).optional().describe("Radius in meters (default 300)"),
       limit: z.number().int().min(1).max(3000).optional().describe("Max road segments (default 400)"),
       query: z.string().optional().describe("Only prefabs whose name contains this"),
+      street: z.string().optional().describe("Only segments whose street name contains this (case-insensitive)"),
       allNets: z
         .boolean()
         .optional()
         .describe("Include every network, not just roads: train/subway/tram tracks (incl. stations' own tracks), paths..."),
     },
   },
-  async ({ x, z: zCoord, radius, limit, query, allNets }) => {
+  async ({ x, z: zCoord, radius, limit, query, street, allNets }) => {
     const params = new URLSearchParams({ x: String(x), z: String(zCoord) });
     if (radius !== undefined) params.set("radius", String(radius));
     if (limit) params.set("limit", String(limit));
     if (query) params.set("query", query);
+    if (street) params.set("street", street);
     if (allNets) params.set("nets", "all");
     try {
       return jsonResult(await bridgeJson(`/city/road-graph?${bridgeQueryString(params)}`));

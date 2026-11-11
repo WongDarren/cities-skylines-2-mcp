@@ -73,6 +73,10 @@ namespace CS2MCP
                     return GetPolicies();
                 case "/city/policies/set":
                     return HandleSetPolicy(request);
+                case "/city/devtree":
+                    return GetDevTree();
+                case "/city/devtree/purchase":
+                    return PurchaseDevTreeNode(request);
                 case "/city/service-budgets":
                     return GetServiceBudgets();
                 case "/city/service-budgets/set":
