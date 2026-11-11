@@ -1431,8 +1431,14 @@ server.registerTool(
       cx: z.number().optional().describe("Curve control point X (with cz)"),
       cz: z.number().optional().describe("Curve control point Z"),
       snap: z.number().min(0).max(50).optional().describe("Snap distance in meters (default 8; 0 = never snap)"),
-      e1: z.number().optional().describe("Elevation of a free (unsnapped) start in meters: >0 bridge/flyover, <0 tunnel"),
-      e2: z.number().optional().describe("Elevation of a free (unsnapped) end in meters"),
+      e1: z.number().optional().describe(
+        "Height of a free (unsnapped) start in meters ABOVE THE TERRAIN under it: >0 bridge/flyover with pillars, " +
+        "<0 tunnel. Ignored when the start snaps to a node or segment; it then takes that node's height. The curve " +
+        "follows the terrain and is lifted by e1->e2 interpolated linearly along its length."),
+      e2: z.number().optional().describe(
+        "Height of a free (unsnapped) end in meters above the terrain (same rules as e1). For multi-piece ramps, end " +
+        "each piece free at the target height. Start the next piece on that end; it snaps to the new node and inherits " +
+        "its height, so the climb is continuous."),
       force: z.boolean().optional().describe("Build even if the prefab is milestone-locked"),
     },
   },

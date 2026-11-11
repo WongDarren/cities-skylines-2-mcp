@@ -65,7 +65,18 @@ in-game numbers (`cs2_demand`, `cs2_budget`) over any guide.
     right, turn 270° while climbing, cross both carriageways at a right angle about 13 m up, then
     come down into the street grid.
   - With `cs2_connect_road`, build the ramp in pieces and climb with `e2` on the pieces before the
-    crossing.
+    crossing. How the elevation parameters work (from `BridgeToolSystem.cs` and `BridgeRoadToolSystem.cs`):
+    - `e1`/`e2` are metres **above the terrain** at that point, not absolute height. The curve follows
+      the ground and is lifted by a linear blend from `e1` to `e2`. Over sloping ground, aim for clearance
+      over the road below, not a fixed absolute height.
+    - They apply only to **free** ends. An end that snaps to an existing node or segment takes that
+      node's height and ignores `e1`/`e2`. Start a ramp snapped at grade (or to an elevated node), and end
+      each piece free with `e2` set. The next piece snaps onto that new node and inherits its height.
+    - Use `snap` 3–5 so the free elevated end isn't pulled onto a nearby ground junction. Never let a
+      piece's start or end sit within snap range of the road you're crossing.
+    - Keep each piece's climb gentle (about 6–8% grade, e.g. +6 m per 80–100 m) or validation fails.
+      Reach about 13 m clearance before the crossing, cross mid-segment, then descend the same way.
+    - Negative values make tunnels. An underpass needs the same ramp length below ground.
   - Cross mid-segment. A curve that passes through an existing node joins it at grade.
 - **Freight bypass.** Industrial trucks must reach the highway without crossing neighbourhoods. Use
   a dedicated highway or arterial from industry to the highway, a cargo train terminal at each
