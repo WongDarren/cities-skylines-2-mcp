@@ -59,6 +59,9 @@ namespace CS2MCP
         private float3[] m_PendingAreaNodes;
         private float2 m_PendingElevations;
         private quaternion m_PendingRotation;
+        // Snap target of an object placement: a road node for net objects such as
+        // roundabouts (or the net object already on it, which is then replaced).
+        private Entity m_PendingOriginal;
         private BridgeRequest m_PendingRequest;
         private ToolBaseSystem m_PreviousTool;
 
@@ -98,8 +101,25 @@ namespace CS2MCP
             m_PendingPrefab = prefab;
             m_PendingPosition = position;
             m_PendingRotation = rotation;
+            m_PendingOriginal = Entity.Null;
             m_PendingRequest = request;
             Activate();
+            return true;
+        }
+
+        /// <summary>
+        /// Must be called on the simulation thread. Places a net object (a
+        /// roundabout) on a road node, the way ObjectToolSystem's SnapNode does:
+        /// the control point's original entity is the node, or the net object
+        /// already attached to it, in which case that object is replaced.
+        /// </summary>
+        public bool TryQueueNetObject(Entity prefabEntity, PrefabBase prefab, float3 position, quaternion rotation, Entity original, BridgeRequest request)
+        {
+            if (!TryQueuePlacement(prefabEntity, prefab, position, rotation, request))
+            {
+                return false;
+            }
+            m_PendingOriginal = original;
             return true;
         }
 
@@ -340,6 +360,7 @@ namespace CS2MCP
             m_PendingRequest = null;
             m_PendingPrefab = null;
             m_PendingPrefabEntity = Entity.Null;
+            m_PendingOriginal = Entity.Null;
             if (m_ToolSystem.activeTool == this)
             {
                 m_ToolSystem.activeTool = m_PreviousTool != null ? m_PreviousTool : m_DefaultToolSystem;
@@ -593,6 +614,8 @@ namespace CS2MCP
             {
                 m_Position = m_PendingPosition,
                 m_Rotation = m_PendingRotation,
+                m_OriginalEntity = m_PendingOriginal,
+                m_Direction = math.normalizesafe(math.forward(m_PendingRotation)).xz,
             };
             definitions.m_AttachmentPrefab = default;
             definitions.m_OwnerData = GetComponentLookup<Owner>(true);

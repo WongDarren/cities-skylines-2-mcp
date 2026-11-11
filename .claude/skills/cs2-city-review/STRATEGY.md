@@ -83,6 +83,15 @@ in-game numbers (`cs2_demand`, `cs2_budget`) over any guide.
   industrial hub, or a harbor. Several small cargo hubs beat one big one.
 - **Roundabouts** keep traffic moving where a signalised junction would stop it. Space junctions out;
   don't put transit stops on corners.
+  - Place one with `cs2_place_roundabout` on a junction id from `cs2_road_graph`. Find the prefabs
+    with `cs2_find_prefabs` category `netobject`, query `round`, and pick a size that fits between
+    the neighbouring junctions. Placing a new one on a junction that already has one replaces it.
+  - Pre-built intersections and interchanges from the Intersections development node are **asset
+    stamps** (`cs2_find_prefabs` category `stamp`). Place them with `cs2_place_building` on a cleared
+    site, then join their roads to the network with `cs2_connect_road`.
+- **Transit vehicle count.** `cs2_set_line_vehicles` only picks the model. To run more or fewer
+  vehicles on a line, use `cs2_set_line_policy` with the line's vehicle-count policy (listed by
+  `cs2_line_policies`).
 - **Transit.** Transit lanes take an existing lane, so use them where frequent lines justify it. Run
   trams or metro along the busiest corridors; connect paths straight to stations.
 - **Alternative intersections (FHWA; Texas DDI / U-turns, Michigan left, RCUT, continuous-flow).**
