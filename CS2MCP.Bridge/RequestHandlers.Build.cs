@@ -624,6 +624,35 @@ namespace CS2MCP
                 return BridgeResponse.Error(409, "entity is already being deleted");
             }
 
+            // Roads that belong to another object (an asset stamp's interchange, a
+            // building's internal roads) can't be bulldozed on their own; the game's
+            // bulldozer deletes the top-level owner instead, so do the same for stamps.
+            if (isNetEdge && EntityManager.HasComponent<Game.Common.Owner>(entity))
+            {
+                Entity top = entity;
+                while (EntityManager.HasComponent<Game.Common.Owner>(top))
+                {
+                    Entity next = EntityManager.GetComponentData<Game.Common.Owner>(top).m_Owner;
+                    if (next == Entity.Null || !EntityManager.Exists(next))
+                    {
+                        break;
+                    }
+                    top = next;
+                }
+                if (top != entity)
+                {
+                    if (EntityManager.HasComponent<Game.Objects.AssetStamp>(top))
+                    {
+                        entity = top;
+                    }
+                    else if (EntityManager.HasComponent<Game.Buildings.Building>(top))
+                    {
+                        return BridgeResponse.Error(400,
+                            $"road segment belongs to building {top.Index}:{top.Version}; demolish that building instead");
+                    }
+                }
+            }
+
             PrefabSystem prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
             string prefabName = null;
             if (EntityManager.HasComponent<PrefabRef>(entity))

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Colossal.Mathematics;
 using Game;
 using Game.City;
@@ -66,6 +67,7 @@ namespace CS2MCP
         private ToolBaseSystem m_PreviousTool;
 
         private CityConfigurationSystem m_CityConfigurationSystem;
+        private EntityQuery m_IconQuery;
 
         public override string toolID => "CS2MCP.Bridge";
 
@@ -76,6 +78,10 @@ namespace CS2MCP
         {
             base.OnCreate();
             m_CityConfigurationSystem = base.World.GetOrCreateSystemManaged<CityConfigurationSystem>();
+            m_IconQuery = EntityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<Game.Notifications.Icon>(),
+                ComponentType.ReadOnly<Owner>(),
+                ComponentType.ReadOnly<PrefabRef>());
         }
 
         public override PrefabBase GetPrefab()
@@ -260,9 +266,13 @@ namespace CS2MCP
                         else
                         {
                             applyMode = ApplyMode.Clear;
+                            List<string> errors = CollectTempErrors();
                             CompletePending(BridgeResponse.Error(409,
-                                "operation blocked by game validation (overlap, water, steep terrain, protected entity...); " +
-                                "try a different position or target"));
+                                "operation blocked by game validation" +
+                                (errors.Count > 0
+                                    ? ": " + string.Join(", ", errors)
+                                    : " (overlap, water, steep terrain, protected entity...)") +
+                                "; try a different position or target"));
                         }
                         m_Stage = Stage.Finish;
                         break;
@@ -346,6 +356,37 @@ namespace CS2MCP
                         note = "committed this frame; verify via /city/buildings or /screenshot",
                     });
             }
+        }
+
+        /// <summary>
+        /// Names of the validation errors the game raised on temp entities
+        /// (error icons whose prefab carries ToolErrorData), as BridgeRoadToolSystem reports them.
+        /// </summary>
+        private List<string> CollectTempErrors()
+        {
+            var names = new List<string>();
+            using (Unity.Collections.NativeArray<Entity> icons = m_IconQuery.ToEntityArray(Unity.Collections.Allocator.Temp))
+            {
+                for (int i = 0; i < icons.Length; i++)
+                {
+                    Entity owner = EntityManager.GetComponentData<Owner>(icons[i]).m_Owner;
+                    if (!EntityManager.Exists(owner) || !EntityManager.HasComponent<Temp>(owner))
+                    {
+                        continue;
+                    }
+                    Entity prefab = EntityManager.GetComponentData<PrefabRef>(icons[i]).m_Prefab;
+                    if (!EntityManager.HasComponent<ToolErrorData>(prefab))
+                    {
+                        continue;
+                    }
+                    string name = EntityManager.GetComponentData<ToolErrorData>(prefab).m_Error.ToString();
+                    if (!names.Contains(name))
+                    {
+                        names.Add(name);
+                    }
+                }
+            }
+            return names;
         }
 
         private void CompletePending(BridgeResponse response)
