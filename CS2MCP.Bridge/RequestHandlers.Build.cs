@@ -43,6 +43,43 @@ namespace CS2MCP
             }
         }
 
+        private EntityQuery m_NetObjectPrefabQuery;
+        private bool m_NetObjectPrefabQueryCreated;
+        private EntityQuery m_StampPrefabQuery;
+        private bool m_StampPrefabQueryCreated;
+
+        /// <summary>Objects that attach to roads: roundabouts and similar junction/segment objects.</summary>
+        private EntityQuery NetObjectPrefabQuery
+        {
+            get
+            {
+                if (!m_NetObjectPrefabQueryCreated)
+                {
+                    m_NetObjectPrefabQuery = EntityManager.CreateEntityQuery(
+                        ComponentType.ReadOnly<PrefabData>(),
+                        ComponentType.ReadOnly<NetObjectData>());
+                    m_NetObjectPrefabQueryCreated = true;
+                }
+                return m_NetObjectPrefabQuery;
+            }
+        }
+
+        /// <summary>Asset stamps: pre-built layouts such as the Intersections node's interchanges.</summary>
+        private EntityQuery StampPrefabQuery
+        {
+            get
+            {
+                if (!m_StampPrefabQueryCreated)
+                {
+                    m_StampPrefabQuery = EntityManager.CreateEntityQuery(
+                        ComponentType.ReadOnly<PrefabData>(),
+                        ComponentType.ReadOnly<AssetStampData>());
+                    m_StampPrefabQueryCreated = true;
+                }
+                return m_StampPrefabQuery;
+            }
+        }
+
         private EntityQuery TreePrefabQuery
         {
             get
@@ -224,8 +261,15 @@ namespace CS2MCP
                 case "tree":
                     query = TreePrefabQuery;
                     break;
+                case "netobject":
+                    query = NetObjectPrefabQuery;
+                    break;
+                case "stamp":
+                    query = StampPrefabQuery;
+                    break;
                 default:
-                    return BridgeResponse.Error(400, "category must be 'building', 'road', 'net' (all networks incl. pipes/power/tracks/paths) or 'tree'");
+                    return BridgeResponse.Error(400, "category must be 'building', 'road', 'net' (all networks incl. pipes/power/tracks/paths), " +
+                        "'tree', 'netobject' (roundabouts and other road-attached objects) or 'stamp' (pre-built intersections/interchanges)");
             }
 
             request.Query.TryGetValue("query", out string search);
@@ -251,11 +295,26 @@ namespace CS2MCP
                     total++;
                     if (results.Count < limit)
                     {
+                        object size = null;
+                        if ((category == "netobject" || category == "stamp")
+                            && EntityManager.HasComponent<ObjectGeometryData>(entity))
+                        {
+                            float3 extent = EntityManager.GetComponentData<ObjectGeometryData>(entity).m_Size;
+                            size = new { width = math.round(extent.x), depth = math.round(extent.z) };
+                        }
+                        object placement = null;
+                        if (category == "netobject" && EntityManager.HasComponent<PlaceableObjectData>(entity))
+                        {
+                            var flags = EntityManager.GetComponentData<PlaceableObjectData>(entity).m_Flags;
+                            placement = (flags & Game.Objects.PlacementFlags.RoadNode) != 0 ? "junction" : "segment";
+                        }
                         results.Add(new
                         {
                             name = prefab.name,
                             type = prefab.GetType().Name,
                             locked = IsLocked(entity),
+                            size,
+                            placement,
                         });
                     }
                 }
@@ -290,9 +349,10 @@ namespace CS2MCP
             request.TryGetFloat("rotation", out float rotationDegrees);
 
             if (!TryFindPrefabByName(BuildingPrefabQuery, prefabName, out Entity prefabEntity, out PrefabBase prefab)
-                && !TryFindPrefabByName(TreePrefabQuery, prefabName, out prefabEntity, out prefab))
+                && !TryFindPrefabByName(TreePrefabQuery, prefabName, out prefabEntity, out prefab)
+                && !TryFindPrefabByName(StampPrefabQuery, prefabName, out prefabEntity, out prefab))
             {
-                return BridgeResponse.Error(404, $"unknown building/tree prefab '{prefabName}'; search via /prefabs?category=building|tree&query=...");
+                return BridgeResponse.Error(404, $"unknown building/tree/stamp prefab '{prefabName}'; search via /prefabs?category=building|tree|stamp&query=...");
             }
             if (IsLocked(prefabEntity) && !IsForced(request))
             {
@@ -562,6 +622,35 @@ namespace CS2MCP
             if (EntityManager.HasComponent<Game.Common.Deleted>(entity))
             {
                 return BridgeResponse.Error(409, "entity is already being deleted");
+            }
+
+            // Roads that belong to another object (an asset stamp's interchange, a
+            // building's internal roads) can't be bulldozed on their own; the game's
+            // bulldozer deletes the top-level owner instead, so do the same for stamps.
+            if (isNetEdge && EntityManager.HasComponent<Game.Common.Owner>(entity))
+            {
+                Entity top = entity;
+                while (EntityManager.HasComponent<Game.Common.Owner>(top))
+                {
+                    Entity next = EntityManager.GetComponentData<Game.Common.Owner>(top).m_Owner;
+                    if (next == Entity.Null || !EntityManager.Exists(next))
+                    {
+                        break;
+                    }
+                    top = next;
+                }
+                if (top != entity)
+                {
+                    if (EntityManager.HasComponent<Game.Objects.AssetStamp>(top))
+                    {
+                        entity = top;
+                    }
+                    else if (EntityManager.HasComponent<Game.Buildings.Building>(top))
+                    {
+                        return BridgeResponse.Error(400,
+                            $"road segment belongs to building {top.Index}:{top.Version}; demolish that building instead");
+                    }
+                }
             }
 
             PrefabSystem prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();

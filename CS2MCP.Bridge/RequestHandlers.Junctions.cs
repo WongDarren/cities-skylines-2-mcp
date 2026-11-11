@@ -2,6 +2,7 @@ using System;
 using Game.Net;
 using Game.Prefabs;
 using Unity.Entities;
+using Unity.Mathematics;
 
 namespace CS2MCP
 {
@@ -78,6 +79,110 @@ namespace CS2MCP
 
             BridgeToolSystem tool = World.GetOrCreateSystemManaged<BridgeToolSystem>();
             if (!tool.TryQueueNodeUpgrade(node, mode.Trim().ToLowerInvariant(), flags, request))
+            {
+                return BridgeResponse.Error(409, "another build operation is in progress, retry shortly");
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Puts a net object such as a roundabout on a road junction, mirroring
+        /// ObjectToolSystem.SnapNode: position = node position raised to the lowest
+        /// road surface around it, rotation = node rotation, original = the node
+        /// (or the net object already on it, which is then replaced).
+        /// </summary>
+        private BridgeResponse PlaceNetObject(BridgeRequest request)
+        {
+            if (!TryGetCity(out _, out BridgeResponse error))
+            {
+                return error;
+            }
+            if (!request.TryGetInt("index", out int index) || !request.TryGetInt("version", out int version))
+            {
+                return BridgeResponse.Error(400, "provide ?index=&version= of a junction (node) from cs2_road_graph");
+            }
+            if (!request.Query.TryGetValue("prefab", out string prefabName) || string.IsNullOrEmpty(prefabName))
+            {
+                return BridgeResponse.Error(400, "provide ?prefab=<name from /prefabs?category=netobject, e.g. a roundabout>");
+            }
+            if (!TryFindPrefabByName(NetObjectPrefabQuery, prefabName, out Entity prefabEntity, out PrefabBase prefab))
+            {
+                return BridgeResponse.Error(404, $"unknown net object prefab '{prefabName}'; search via /prefabs?category=netobject&query=round");
+            }
+            if (IsLocked(prefabEntity) && !IsForced(request))
+            {
+                return BridgeResponse.Error(409, $"prefab '{prefab.name}' is locked (development tree or milestone); pass force=true to place anyway");
+            }
+
+            var node = new Entity { Index = index, Version = version };
+            if (!EntityManager.Exists(node) || !EntityManager.HasComponent<Node>(node)
+                || !EntityManager.HasBuffer<ConnectedEdge>(node))
+            {
+                return BridgeResponse.Error(404, $"{index}:{version} is not an existing junction");
+            }
+            if (EntityManager.HasComponent<PlaceableObjectData>(prefabEntity)
+                && (EntityManager.GetComponentData<PlaceableObjectData>(prefabEntity).m_Flags & Game.Objects.PlacementFlags.RoadNode) == 0)
+            {
+                return BridgeResponse.Error(400, $"'{prefab.name}' does not go on a junction (it is placed on road segments)");
+            }
+
+            Node nodeData = EntityManager.GetComponentData<Node>(node);
+            float surface = float.MaxValue;
+            int roads = 0;
+            DynamicBuffer<ConnectedEdge> edges = EntityManager.GetBuffer<ConnectedEdge>(node, isReadOnly: true);
+            for (int i = 0; i < edges.Length; i++)
+            {
+                Entity edge = edges[i].m_Edge;
+                if (EntityManager.HasComponent<Road>(edge))
+                {
+                    roads++;
+                }
+                if (!EntityManager.HasComponent<Edge>(edge) || !EntityManager.HasComponent<Composition>(edge))
+                {
+                    continue;
+                }
+                Edge edgeData = EntityManager.GetComponentData<Edge>(edge);
+                Composition composition = EntityManager.GetComponentData<Composition>(edge);
+                Entity nodeComposition = edgeData.m_Start == node ? composition.m_StartNode
+                    : edgeData.m_End == node ? composition.m_EndNode
+                    : Entity.Null;
+                if (nodeComposition != Entity.Null && EntityManager.HasComponent<NetCompositionData>(nodeComposition))
+                {
+                    surface = Math.Min(surface, EntityManager.GetComponentData<NetCompositionData>(nodeComposition).m_SurfaceHeight.min);
+                }
+            }
+            if (roads == 0)
+            {
+                return BridgeResponse.Error(400, "that node has no roads");
+            }
+
+            float3 position = nodeData.m_Position;
+            if (surface < float.MaxValue)
+            {
+                position.y += surface;
+            }
+
+            // An existing net object on the node is the original, so it is replaced
+            // (as clicking a new roundabout onto an old one does in game).
+            Entity original = node;
+            if (EntityManager.HasBuffer<Game.Objects.SubObject>(node))
+            {
+                DynamicBuffer<Game.Objects.SubObject> subObjects = EntityManager.GetBuffer<Game.Objects.SubObject>(node, isReadOnly: true);
+                for (int i = 0; i < subObjects.Length; i++)
+                {
+                    Entity sub = subObjects[i].m_SubObject;
+                    if (EntityManager.HasComponent<PrefabRef>(sub)
+                        && EntityManager.HasComponent<NetObjectData>(EntityManager.GetComponentData<PrefabRef>(sub).m_Prefab)
+                        && EntityManager.HasComponent<Game.Objects.Attached>(sub))
+                    {
+                        original = sub;
+                        break;
+                    }
+                }
+            }
+
+            BridgeToolSystem tool = World.GetOrCreateSystemManaged<BridgeToolSystem>();
+            if (!tool.TryQueueNetObject(prefabEntity, prefab, position, nodeData.m_Rotation, original, request))
             {
                 return BridgeResponse.Error(409, "another build operation is in progress, retry shortly");
             }

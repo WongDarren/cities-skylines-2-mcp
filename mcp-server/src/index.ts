@@ -437,12 +437,15 @@ server.registerTool(
     description:
       "Search the game's building or road prefabs by name substring. Returns exact prefab names " +
       "needed by cs2_place_building, plus their type and locked state. Example queries: 'school', " +
-      "'FireHouse', 'WindTurbine', 'Highway'.",
+      "'FireHouse', 'WindTurbine', 'Highway'. category 'netobject' lists roundabouts (and other road-attached " +
+      "objects) for cs2_place_roundabout, with size and placement (junction or segment); 'stamp' lists pre-built " +
+      "intersections/interchanges from the Intersections development node, placed with cs2_place_building.",
     inputSchema: {
       category: z
-        .enum(["building", "road", "net", "tree"])
+        .enum(["building", "road", "net", "tree", "netobject", "stamp"])
         .optional()
-        .describe("Prefab category (default building); 'net' = all networks incl. train tracks, pipes, power lines, pedestrian paths"),
+        .describe("Prefab category (default building); 'net' = all networks incl. train tracks, pipes, power lines, pedestrian paths; " +
+          "'netobject' = roundabouts and other road-attached objects; 'stamp' = pre-built intersections/interchanges"),
       query: z.string().optional().describe("Case-insensitive name substring filter"),
       limit: z.number().int().min(1).max(200).optional().describe("Max results (default 50)"),
     },
@@ -469,7 +472,9 @@ server.registerTool(
       "-7000 to +7000 on each axis, use cs2_list_buildings to see coordinates of existing buildings for " +
       "reference). Height is sampled from the terrain automatically. The game validates the placement " +
       "(collisions, terrain, water) and the call fails with an explanation if blocked. Costs city money " +
-      "like a normal player action. Verify the result with cs2_screenshot or cs2_list_buildings.",
+      "like a normal player action. Verify the result with cs2_screenshot or cs2_list_buildings. Also places " +
+      "asset stamps (cs2_find_prefabs category 'stamp': pre-built intersections/interchanges); the stamp's roads " +
+      "are built at x/z with the given rotation, so clear the site first and join them up with cs2_connect_road.",
     inputSchema: {
       prefab: z.string().describe("Exact prefab name from cs2_find_prefabs"),
       x: z.number().describe("World X coordinate (meters)"),
@@ -1691,6 +1696,35 @@ server.registerTool(
 );
 
 server.registerTool(
+  "cs2_place_roundabout",
+  {
+    title: "Put a roundabout on a junction",
+    description:
+      "Place a roundabout (or another junction net object) on an existing road junction, like dropping one from " +
+      "the game's Roundabouts menu onto an intersection: the game rebuilds the junction as a roundabout of the " +
+      "prefab's size. Find prefabs with cs2_find_prefabs category 'netobject' (query 'round'; pick one whose size " +
+      "fits between neighbouring junctions) and the junction id with cs2_road_graph. A roundabout already on the " +
+      "junction is replaced. Validated by the game (overlap with buildings or nearby junctions fails); costs money. " +
+      "Save first; check the result with cs2_road_graph / cs2_traffic.",
+    inputSchema: {
+      index: z.number().int().describe("Junction (node) entity index from cs2_road_graph"),
+      version: z.number().int().describe("Junction (node) entity version"),
+      prefab: z.string().describe("Roundabout prefab name from cs2_find_prefabs category 'netobject'"),
+      force: z.boolean().optional().describe("Place even if the prefab is locked"),
+    },
+  },
+  async ({ index, version, prefab, force }) => {
+    const params = new URLSearchParams({ index: String(index), version: String(version), prefab });
+    if (force) params.set("force", "true");
+    try {
+      return jsonResult(await bridgeJson(`/build/netobject?${bridgeQueryString(params)}`, 15_000));
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
   "cs2_line_vehicles",
   {
     title: "Transit line vehicle models",
@@ -1720,7 +1754,9 @@ server.registerTool(
     description:
       "Choose the vehicle model new vehicles on a transit line use, as the line panel's vehicle selection does: " +
       "primary = engine or single vehicle, secondary = carriage (names from cs2_line_vehicles). clear=true goes " +
-      "back to a random model per vehicle. Vehicles already running keep their model.",
+      "back to a random model per vehicle. Vehicles already running keep their model. This does NOT change how many " +
+      "vehicles run: for that use cs2_set_line_policy with the line's vehicle-count policy (see cs2_line_policies, " +
+      "'Route Vehicle Count' slider).",
     inputSchema: {
       index: z.number().int().describe("Line entity index"),
       version: z.number().int().describe("Line entity version"),
@@ -1924,6 +1960,7 @@ const batchOp = z.discriminatedUnion("op", [
     snap: z.number().optional(), cx: z.number().optional(), cz: z.number().optional(), e1: z.number().optional(), e2: z.number().optional() }),
   z.object({ op: z.literal("demolish"), index: z.number().int(), version: z.number().int() }),
   z.object({ op: z.literal("junction"), index: z.number().int(), version: z.number().int(), mode: z.enum(["lights", "nolights", "stop", "default"]) }),
+  z.object({ op: z.literal("roundabout"), index: z.number().int(), version: z.number().int(), prefab: z.string() }),
   z.object({ op: z.literal("roadside"), prefab: z.string(), road: segRef, side: z.enum(["left", "right"]), t: z.number().optional(), gap: z.number().optional() }),
   z.object({ op: z.literal("stop"), type: z.enum(["bus", "tram"]), x: z.number(), z: z.number(), prefab: z.string().optional(), radius: z.number().optional() }),
   z.object({ op: z.literal("place"), prefab: z.string(), x: z.number(), z: z.number(), rotation: z.number().optional() }),
@@ -1944,6 +1981,7 @@ function batchRequest(op: BatchOp): string {
     case "connect": path = "/build/road/connect"; for (const k of ["prefab", "x1", "z1", "x2", "z2", "snap", "cx", "cz", "e1", "e2"] as const) set(k, op[k]); break;
     case "demolish": path = "/build/demolish"; set("index", op.index); set("version", op.version); break;
     case "junction": path = "/build/junction"; set("index", op.index); set("version", op.version); set("mode", op.mode); break;
+    case "roundabout": path = "/build/netobject"; set("index", op.index); set("version", op.version); set("prefab", op.prefab); break;
     case "roadside": path = "/build/place/roadside"; set("prefab", op.prefab); set("road", `${op.road.index}:${op.road.version}`);
       set("side", op.side); set("t", op.t); set("gap", op.gap); break;
     case "stop": path = "/transit/stops/place"; set("type", op.type); set("x", op.x); set("z", op.z); set("prefab", op.prefab); set("radius", op.radius); break;
@@ -1974,7 +2012,7 @@ server.registerTool(
     description:
       "Run many build operations in one call, in order (the game applies one build at a time; this waits and " +
       "retries while the previous one finishes). Ops: upgrade (road upgrades incl. tram, remove=true to take off), " +
-      "replace (road type), zone, connect (road/track/pipe/path), demolish, junction (lights/nolights/stop), " +
+      "replace (road type), zone, connect (road/track/pipe/path), demolish, junction (lights/nolights/stop), roundabout (net object on a junction), " +
       "roadside (building flush to a road), stop (bus/tram stop), place (building at x,z). Returns one short line per " +
       "op with the new ids. Same semantics and costs as the single-op tools.",
     inputSchema: {

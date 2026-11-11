@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Colossal.Mathematics;
 using Game;
 using Game.City;
@@ -59,10 +60,14 @@ namespace CS2MCP
         private float3[] m_PendingAreaNodes;
         private float2 m_PendingElevations;
         private quaternion m_PendingRotation;
+        // Snap target of an object placement: a road node for net objects such as
+        // roundabouts (or the net object already on it, which is then replaced).
+        private Entity m_PendingOriginal;
         private BridgeRequest m_PendingRequest;
         private ToolBaseSystem m_PreviousTool;
 
         private CityConfigurationSystem m_CityConfigurationSystem;
+        private EntityQuery m_IconQuery;
 
         public override string toolID => "CS2MCP.Bridge";
 
@@ -73,6 +78,10 @@ namespace CS2MCP
         {
             base.OnCreate();
             m_CityConfigurationSystem = base.World.GetOrCreateSystemManaged<CityConfigurationSystem>();
+            m_IconQuery = EntityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<Game.Notifications.Icon>(),
+                ComponentType.ReadOnly<Owner>(),
+                ComponentType.ReadOnly<PrefabRef>());
         }
 
         public override PrefabBase GetPrefab()
@@ -98,8 +107,25 @@ namespace CS2MCP
             m_PendingPrefab = prefab;
             m_PendingPosition = position;
             m_PendingRotation = rotation;
+            m_PendingOriginal = Entity.Null;
             m_PendingRequest = request;
             Activate();
+            return true;
+        }
+
+        /// <summary>
+        /// Must be called on the simulation thread. Places a net object (a
+        /// roundabout) on a road node, the way ObjectToolSystem's SnapNode does:
+        /// the control point's original entity is the node, or the net object
+        /// already attached to it, in which case that object is replaced.
+        /// </summary>
+        public bool TryQueueNetObject(Entity prefabEntity, PrefabBase prefab, float3 position, quaternion rotation, Entity original, BridgeRequest request)
+        {
+            if (!TryQueuePlacement(prefabEntity, prefab, position, rotation, request))
+            {
+                return false;
+            }
+            m_PendingOriginal = original;
             return true;
         }
 
@@ -240,9 +266,13 @@ namespace CS2MCP
                         else
                         {
                             applyMode = ApplyMode.Clear;
+                            List<string> errors = CollectTempErrors();
                             CompletePending(BridgeResponse.Error(409,
-                                "operation blocked by game validation (overlap, water, steep terrain, protected entity...); " +
-                                "try a different position or target"));
+                                "operation blocked by game validation" +
+                                (errors.Count > 0
+                                    ? ": " + string.Join(", ", errors)
+                                    : " (overlap, water, steep terrain, protected entity...)") +
+                                "; try a different position or target"));
                         }
                         m_Stage = Stage.Finish;
                         break;
@@ -328,6 +358,37 @@ namespace CS2MCP
             }
         }
 
+        /// <summary>
+        /// Names of the validation errors the game raised on temp entities
+        /// (error icons whose prefab carries ToolErrorData), as BridgeRoadToolSystem reports them.
+        /// </summary>
+        private List<string> CollectTempErrors()
+        {
+            var names = new List<string>();
+            using (Unity.Collections.NativeArray<Entity> icons = m_IconQuery.ToEntityArray(Unity.Collections.Allocator.Temp))
+            {
+                for (int i = 0; i < icons.Length; i++)
+                {
+                    Entity owner = EntityManager.GetComponentData<Owner>(icons[i]).m_Owner;
+                    if (!EntityManager.Exists(owner) || !EntityManager.HasComponent<Temp>(owner))
+                    {
+                        continue;
+                    }
+                    Entity prefab = EntityManager.GetComponentData<PrefabRef>(icons[i]).m_Prefab;
+                    if (!EntityManager.HasComponent<ToolErrorData>(prefab))
+                    {
+                        continue;
+                    }
+                    string name = EntityManager.GetComponentData<ToolErrorData>(prefab).m_Error.ToString();
+                    if (!names.Contains(name))
+                    {
+                        names.Add(name);
+                    }
+                }
+            }
+            return names;
+        }
+
         private void CompletePending(BridgeResponse response)
         {
             m_PendingRequest?.Complete(response);
@@ -340,6 +401,7 @@ namespace CS2MCP
             m_PendingRequest = null;
             m_PendingPrefab = null;
             m_PendingPrefabEntity = Entity.Null;
+            m_PendingOriginal = Entity.Null;
             if (m_ToolSystem.activeTool == this)
             {
                 m_ToolSystem.activeTool = m_PreviousTool != null ? m_PreviousTool : m_DefaultToolSystem;
@@ -593,6 +655,8 @@ namespace CS2MCP
             {
                 m_Position = m_PendingPosition,
                 m_Rotation = m_PendingRotation,
+                m_OriginalEntity = m_PendingOriginal,
+                m_Direction = math.normalizesafe(math.forward(m_PendingRotation)).xz,
             };
             definitions.m_AttachmentPrefab = default;
             definitions.m_OwnerData = GetComponentLookup<Owner>(true);

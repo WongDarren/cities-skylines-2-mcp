@@ -89,6 +89,8 @@ namespace CS2MCP
                     return BuildRoad(request);
                 case "/build/upgrade":
                     return HandleUpgradeRoad(request);
+                case "/build/netobject":
+                    return PlaceNetObject(request);
                 case "/build/junction":
                     return SetJunctionControl(request);
                 case "/zones":
