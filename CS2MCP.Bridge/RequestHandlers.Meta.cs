@@ -128,6 +128,8 @@ namespace CS2MCP
 
             uint targetFrame = sim.frameIndex + (uint)(hours * kFramesPerHour);
             m_System.SetAutoPause(targetFrame);
+            m_System.AutoRunSpeed = speed;
+            List<string> closed = m_System.DismissPopups();
             sim.selectedSpeed = speed;
 
             return BridgeResponse.Json(new
@@ -137,7 +139,20 @@ namespace CS2MCP
                 speed,
                 startFrame = sim.frameIndex,
                 targetFrame,
-                note = "simulation auto-pauses at targetFrame; poll /state (frameIndex) to track progress; cancel with /sim/run?cancel=true",
+                popupHandlersRun = closed.Count,
+                note = "simulation auto-pauses at targetFrame; reward popups (milestones...) that pause the game mid-run are closed automatically; poll /state (frameIndex) to track progress; cancel with /sim/run?cancel=true",
+            });
+        }
+
+        private BridgeResponse DismissPopups()
+        {
+            List<string> invoked = m_System.DismissPopups();
+            SimulationSystem sim = World.GetOrCreateSystemManaged<SimulationSystem>();
+            return BridgeResponse.Json(new
+            {
+                handlersRun = invoked,
+                paused = sim.selectedSpeed == 0f,
+                note = "ran the game's own Close handlers for reward popups; unpause with cs2_set_simulation if needed",
             });
         }
 

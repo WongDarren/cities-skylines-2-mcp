@@ -125,6 +125,8 @@ namespace CS2MCP
                     return SimControl(request);
                 case "/sim/run":
                     return SimRun(request);
+                case "/sim/dismiss-popups":
+                    return DismissPopups();
                 case "/game/save":
                     return SaveGame(request);
                 case "/city/tiles":
