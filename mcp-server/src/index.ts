@@ -58,8 +58,36 @@ async function bridgeJson(path: string, timeoutMs = 12_000): Promise<unknown> {
   return payload;
 }
 
+/** CS2MCP_VERBOSE=1 restores pretty-printed, unabridged tool output. */
+const VERBOSE = process.env.CS2MCP_VERBOSE === "1";
+/** Boilerplate keys the bridge repeats in every reply; they cost tokens and carry no data. */
+const DROP_KEYS = new Set(["note", "stalenessWarning"]);
+
+/**
+ * Shrink a bridge payload for the model: drop boilerplate keys and nulls, and
+ * round fractional numbers (2 decimals below 10, else 1). Coordinates keep
+ * 0.1 m precision, which is finer than any placement needs.
+ */
+function compact(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(compact);
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value)) {
+      if (DROP_KEYS.has(key) || item === null || item === undefined) continue;
+      out[key] = compact(item);
+    }
+    return out;
+  }
+  if (typeof value === "number" && !Number.isInteger(value)) {
+    const scale = Math.abs(value) < 10 ? 100 : 10;
+    return Math.round(value * scale) / scale;
+  }
+  return value;
+}
+
 function jsonResult(payload: unknown) {
-  return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
+  const text = VERBOSE ? JSON.stringify(payload, null, 2) : JSON.stringify(compact(payload));
+  return { content: [{ type: "text" as const, text }] };
 }
 
 function errorResult(err: unknown) {
@@ -1707,6 +1735,274 @@ server.registerTool(
     } catch (err) {
       return errorResult(err);
     }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Token-saving tools: one compact city digest and batched build operations.
+// ---------------------------------------------------------------------------
+
+/** Notification types that are routine progress, not problems. */
+const ROUTINE_NOTIFICATIONS = new Set(["Leveling Building", "Building Level Up", "Selected"]);
+
+type Json = Record<string, any>;
+
+const pct = (used: number, cap: number) => (cap > 0 ? Math.round((used / cap) * 100) : null);
+const xz = (p: Json | undefined) => (p ? `${Math.round(p.x)},${Math.round(p.z)}` : "?");
+
+server.registerTool(
+  "cs2_city_digest",
+  {
+    title: "City digest (one-call review)",
+    description:
+      "Everything a city review needs in one compact reply: date/speed, population, happiness, health, money, " +
+      "budget, power/water/sewage load (%), garbage, residential/commercial/industrial/office demand with the " +
+      "strongest factors, zone fill, unspent development points and affordable nodes, problem warnings grouped by " +
+      "type with a few locations (routine 'leveling' icons left out), city traffic flow with the worst roads, and " +
+      "transit line ridership. Use this instead of calling the individual status tools one by one.",
+    inputSchema: {
+      warningLocations: z.number().int().min(0).max(20).optional().describe("Locations listed per warning type (default 4)"),
+      worstRoads: z.number().int().min(0).max(25).optional().describe("Worst roads to list (default 6)"),
+    },
+  },
+  async ({ warningLocations, worstRoads }) => {
+    const perType = warningLocations ?? 4;
+    const roadCount = worstRoads ?? 6;
+    const paths = {
+      state: "/state",
+      overview: "/city/overview",
+      budget: "/city/budget",
+      services: "/city/services",
+      demand: "/city/demand",
+      zoning: "/city/zoning",
+      devtree: "/city/devtree",
+      notifications: "/city/notifications?limit=500",
+      traffic: `/city/traffic?limit=${Math.max(roadCount, 1)}&minVolume=50`,
+      lines: "/transit/lines",
+    } as const;
+    const keys = Object.keys(paths) as (keyof typeof paths)[];
+    const settled = await Promise.allSettled(keys.map((k) => bridgeJson(paths[k], 20_000)));
+    const got: Partial<Record<keyof typeof paths, Json>> = {};
+    const failed: string[] = [];
+    settled.forEach((r, i) => {
+      if (r.status === "fulfilled") got[keys[i]] = r.value as Json;
+      else failed.push(`${keys[i]}: ${(r.reason as Error).message}`);
+    });
+    if (!got.overview) return errorResult(new Error(`digest failed: ${failed.join("; ")}`));
+
+    const o = got.overview;
+    const sim = got.state?.simulation ?? {};
+    const digest: Json = {
+      date: o.gameDateTime,
+      sim: sim.paused ? "paused" : `x${sim.selectedSpeed}`,
+      pop: o.population,
+      movingIn: (o.populationWithMoveIn ?? o.population) - o.population,
+      happiness: o.averageHappiness,
+      health: o.averageHealth,
+      money: Math.round(o.money),
+      xp: o.xp,
+    };
+
+    const b = got.budget;
+    if (b) {
+      digest.budget = {
+        income: Math.round(b.totalIncome),
+        expenses: Math.round(Math.abs(b.totalExpenses)),
+        balance: Math.round(b.balance),
+        loanInterest: Math.round(b.expenses?.LoanInterest ?? 0),
+      };
+    }
+
+    const s = got.services;
+    if (s) {
+      const e = s.electricity ?? {};
+      const w = s.water ?? {};
+      digest.utilities = {
+        powerMW: `${Math.round((e.consumption ?? 0) / 1000)}/${Math.round((e.production ?? 0) / 1000)} (${pct(e.consumption, e.production)}%)`,
+        powerUnmet: Math.round(((e.consumption ?? 0) - (e.fulfilledConsumption ?? 0)) / 1000) || undefined,
+        water: `${Math.round((w.freshConsumption ?? 0) / 1000)}k/${Math.round((w.freshCapacity ?? 0) / 1000)}k (${pct(w.freshConsumption, w.freshCapacity)}%)`,
+        sewage: `${Math.round((w.sewageConsumption ?? 0) / 1000)}k/${Math.round((w.sewageCapacity ?? 0) / 1000)}k (${pct(w.sewageConsumption, w.sewageCapacity)}%)`,
+        imports: (e.import || w.freshImport) ? { power: e.import, water: w.freshImport } : undefined,
+        garbageRate: Math.round(s.garbage?.accumulationRate ?? 0),
+      };
+    }
+
+    const d = got.demand;
+    if (d) {
+      const strong = (factors: Json | undefined) =>
+        Object.entries(factors ?? {})
+          .filter(([, v]) => Math.abs(Number(v)) >= 40)
+          .map(([k, v]) => `${k} ${v}`)
+          .join(", ") || undefined;
+      const r = d.residential ?? {};
+      digest.demand = {
+        res: r.buildingDemand,
+        resFactors: strong(r.factors?.mediumDensity),
+        com: d.commercial?.buildingDemand,
+        comFactors: strong(d.commercial?.factors),
+        ind: d.industrial?.buildingDemand,
+        indFactors: strong(d.industrial?.factors),
+        off: d.office?.buildingDemand,
+        offFactors: strong(d.office?.factors),
+      };
+    }
+
+    const zn = got.zoning;
+    if (zn?.byZone) {
+      const zones: Json = {};
+      for (const [name, v] of Object.entries(zn.byZone as Json)) {
+        zones[name] = `${pct(v.occupied, v.cells)}% of ${v.cells} (${v.empty} empty)`;
+      }
+      digest.zones = zones;
+    }
+
+    const dt = got.devtree;
+    if (dt) {
+      const pts = dt.points ?? 0;
+      digest.devPoints = pts;
+      if (pts > 0) {
+        digest.devAffordable = (dt.nodes ?? [])
+          .filter((n: Json) => !n.purchased && n.allRequirementsPurchased && n.cost <= pts)
+          .map((n: Json) => `${n.name}(${n.cost})`);
+      }
+    }
+
+    const nt = got.notifications;
+    if (nt) {
+      const byType: Json = {};
+      for (const [type, count] of Object.entries((nt.countsByType ?? {}) as Json)) {
+        if (ROUTINE_NOTIFICATIONS.has(type)) continue;
+        byType[type] = { n: count, at: [] as string[] };
+      }
+      for (const item of (nt.notifications ?? []) as Json[]) {
+        const slot = byType[item.type];
+        if (slot && slot.at.length < perType) slot.at.push(xz(item.location));
+      }
+      digest.warnings = Object.fromEntries(
+        Object.entries(byType).map(([t, v]) => [t, perType > 0 ? `${v.n} @ ${v.at.join(" ")}` : v.n]),
+      );
+    }
+
+    const tr = got.traffic;
+    if (tr) {
+      digest.traffic = {
+        flow: tr.cityTrafficFlowPercent,
+        under25: tr.congestedRoads?.below25Percent,
+        bottlenecks: tr.bottlenecks?.count,
+        worst: ((tr.worstRoads ?? []) as Json[])
+          .slice(0, roadCount)
+          .map((r) => `${r.prefab} ${xz(r.start)}->${xz(r.end)} ${r.flowPercent}% v${Math.round(r.volume)}`),
+      };
+    }
+
+    const ln = got.lines;
+    if (ln?.lines) {
+      digest.transit = (ln.lines as Json[]).map(
+        (l) => `${l.name}: ${l.vehicles} veh, ${l.passengersOnBoard} pax, ${Math.round((l.usage ?? 0) * 100)}%${l.active ? "" : " INACTIVE"}`,
+      );
+    }
+
+    if (failed.length) digest.unavailable = failed;
+    return { content: [{ type: "text" as const, text: VERBOSE ? JSON.stringify(digest, null, 2) : JSON.stringify(digest) }] };
+  },
+);
+
+const segRef = z.object({ index: z.number().int(), version: z.number().int() });
+
+const batchOp = z.discriminatedUnion("op", [
+  z.object({ op: z.literal("upgrade"), index: z.number().int(), version: z.number().int(), upgrades: z.string(),
+    side: z.enum(["both", "left", "right"]).optional(), remove: z.boolean().optional() }),
+  z.object({ op: z.literal("replace"), roads: z.array(segRef).min(1).max(50), prefab: z.string(), invert: z.boolean().optional() }),
+  z.object({ op: z.literal("zone"), zone: z.string(), x: z.number(), z: z.number(), radius: z.number().optional() }),
+  z.object({ op: z.literal("connect"), prefab: z.string(), x1: z.number(), z1: z.number(), x2: z.number(), z2: z.number(),
+    snap: z.number().optional(), cx: z.number().optional(), cz: z.number().optional(), e1: z.number().optional(), e2: z.number().optional() }),
+  z.object({ op: z.literal("demolish"), index: z.number().int(), version: z.number().int() }),
+  z.object({ op: z.literal("junction"), index: z.number().int(), version: z.number().int(), mode: z.enum(["lights", "nolights", "stop", "default"]) }),
+  z.object({ op: z.literal("roadside"), prefab: z.string(), road: segRef, side: z.enum(["left", "right"]), t: z.number().optional(), gap: z.number().optional() }),
+  z.object({ op: z.literal("stop"), type: z.enum(["bus", "tram"]), x: z.number(), z: z.number(), prefab: z.string().optional(), radius: z.number().optional() }),
+  z.object({ op: z.literal("place"), prefab: z.string(), x: z.number(), z: z.number(), rotation: z.number().optional() }),
+]);
+type BatchOp = z.infer<typeof batchOp>;
+
+/** Bridge path and query for one batch operation. */
+function batchRequest(op: BatchOp): string {
+  const p = new URLSearchParams();
+  const set = (k: string, v: unknown) => { if (v !== undefined) p.set(k, String(v)); };
+  let path: string;
+  switch (op.op) {
+    case "upgrade": path = "/build/upgrade"; set("index", op.index); set("version", op.version); set("upgrades", op.upgrades);
+      set("side", op.side); if (op.remove) set("remove", "true"); break;
+    case "replace": path = "/build/road/replace"; set("roads", op.roads.map((r) => `${r.index}:${r.version}`).join(";"));
+      set("prefab", op.prefab); set("invert", op.invert); break;
+    case "zone": path = "/build/zone"; set("zone", op.zone); set("x", op.x); set("z", op.z); set("radius", op.radius); break;
+    case "connect": path = "/build/road/connect"; for (const k of ["prefab", "x1", "z1", "x2", "z2", "snap", "cx", "cz", "e1", "e2"] as const) set(k, op[k]); break;
+    case "demolish": path = "/build/demolish"; set("index", op.index); set("version", op.version); break;
+    case "junction": path = "/build/junction"; set("index", op.index); set("version", op.version); set("mode", op.mode); break;
+    case "roadside": path = "/build/place/roadside"; set("prefab", op.prefab); set("road", `${op.road.index}:${op.road.version}`);
+      set("side", op.side); set("t", op.t); set("gap", op.gap); break;
+    case "stop": path = "/transit/stops/place"; set("type", op.type); set("x", op.x); set("z", op.z); set("prefab", op.prefab); set("radius", op.radius); break;
+    case "place": path = "/build/place"; set("prefab", op.prefab); set("x", op.x); set("z", op.z); set("rotation", op.rotation); break;
+  }
+  return `${path}?${bridgeQueryString(p)}`;
+}
+
+/** One-line result: just the ids and numbers needed for follow-up calls. */
+function batchSummary(op: BatchOp, r: Json): string {
+  switch (op.op) {
+    case "stop": return `stop ${r.stop?.index}:${r.stop?.version} @${xz(r.position)}`;
+    case "connect": return `segs ${((r.segments ?? []) as Json[]).map((s) => `${s.road.index}:${s.road.version}`).join(",") || "none(nothing built?)"}`;
+    case "zone": return `${r.cellsChanged} cells`;
+    case "replace": return `${r.replaced} replaced`;
+    case "roadside": case "place": return `${r.prefab ?? op.prefab} @${xz(r.position)}`;
+    case "demolish": return `removed ${r.prefab}`;
+    default: return "ok";
+  }
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+server.registerTool(
+  "cs2_batch",
+  {
+    title: "Batch build operations",
+    description:
+      "Run many build operations in one call, in order (the game applies one build at a time; this waits and " +
+      "retries while the previous one finishes). Ops: upgrade (road upgrades incl. tram, remove=true to take off), " +
+      "replace (road type), zone, connect (road/track/pipe/path), demolish, junction (lights/nolights/stop), " +
+      "roadside (building flush to a road), stop (bus/tram stop), place (building at x,z). Returns one short line per " +
+      "op with the new ids. Same semantics and costs as the single-op tools.",
+    inputSchema: {
+      ops: z.array(batchOp).min(1).max(60).describe("Operations, run in order"),
+      stopOnError: z.boolean().optional().describe("Stop at the first failed op (default false: continue)"),
+    },
+  },
+  async ({ ops, stopOnError }) => {
+    const lines: string[] = [];
+    let ok = 0;
+    for (let i = 0; i < ops.length; i++) {
+      const op = ops[i];
+      let line = "";
+      for (let attempt = 0; attempt < 12; attempt++) {
+        try {
+          const r = (await bridgeJson(batchRequest(op), 20_000)) as Json;
+          line = `#${i} ${op.op} ok: ${batchSummary(op, r)}`;
+          ok++;
+          break;
+        } catch (err) {
+          const msg = (err as Error).message;
+          if (/in progress|retry shortly/i.test(msg) && attempt < 11) {
+            await sleep(500);
+            continue;
+          }
+          line = `#${i} ${op.op} FAILED: ${msg.slice(0, 160)}`;
+          break;
+        }
+      }
+      lines.push(line);
+      if (stopOnError && line.includes("FAILED")) break;
+    }
+    lines.unshift(`${ok}/${ops.length} ok`);
+    return { content: [{ type: "text" as const, text: lines.join("\n") }] };
   },
 );
 

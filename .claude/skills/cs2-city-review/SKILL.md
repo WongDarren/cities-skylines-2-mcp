@@ -49,8 +49,10 @@ Read the memory notes first if they are in context (`cs2-sf-city-progress`, `cs2
 ## Review procedure
 
 1. `cs2_ping`. If the game is not in `Game` mode, say so and stop.
-2. Read `cs2_game_state`, `cs2_city_overview`, `cs2_budget`, `cs2_city_services`,
-   `cs2_notifications` (limit 5; raise it only when a warning type needs locations), `cs2_demand`, `cs2_zoning`.
+2. Call **`cs2_city_digest`** once. It returns date, population, money, budget, utility load %, demand with
+   factors, zone fill, unspent dev points, problem warnings with locations, worst roads and transit ridership in
+   ~2k characters. Only call the single status tools (`cs2_notifications`, `cs2_demand`...) when you need detail
+   the digest leaves out.
 3. If the game is paused before a timed run's target, take a `cs2_screenshot`: a milestone or signature-building
    popup is probably open. Tell the user to close it (or call `cs2_dismiss_popups` if that tool exists).
    If the timed run has ended, restart it: `cs2_run_simulation` 48 hours at speed 8.
@@ -73,6 +75,12 @@ Read the memory notes first if they are in context (`cs2-sf-city-progress`, `cs2
 
 - `cs2_connect_road` with `snap: 3` keeps exact coordinates. The default snap (8) jumps to nearby old junctions.
 - Send build, demolish and placement calls **one at a time**. Parallel calls fail with "another build operation is in progress".
+  For more than two builds use **`cs2_batch`** (upgrade, replace, zone, connect, demolish, junction, roadside, stop,
+  place): one call, run in order with automatic retry, one short result line per op.
+- **Token economy.** Tool replies are compact JSON by default (set `CS2MCP_VERBOSE=1` for the old output). Prefer the
+  digest and batch tools, filter `cs2_road_graph` by `street`/`query`/small `radius`, and run long simulations in
+  one `cs2_run_simulation` call instead of short checks. Routine reviews can go to the `cs2-mayor` subagent on a
+  cheaper model so the main conversation stays short.
 - Zone with `cs2_zone_area` circles of radius 90–110 placed between the streets. Keep circles away from
   frontages you want left empty; zoning only fills unoccupied cells.
 - Segment ids change when a road is split. If `cs2_place_roadside` says "provide ?road=", look the segment up again
