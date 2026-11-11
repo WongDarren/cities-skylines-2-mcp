@@ -374,6 +374,31 @@ namespace CS2MCP
             }
         }
 
+        /// <summary>
+        /// The street name the game shows for a road segment: segments are grouped
+        /// into a named street (aggregate) entity.
+        /// </summary>
+        private string StreetNameOf(Game.UI.NameSystem names, Entity edge)
+        {
+            if (!EntityManager.HasComponent<Aggregated>(edge))
+            {
+                return null;
+            }
+            Entity aggregate = EntityManager.GetComponentData<Aggregated>(edge).m_Aggregate;
+            if (aggregate == Entity.Null || !EntityManager.Exists(aggregate))
+            {
+                return null;
+            }
+            try
+            {
+                return names.GetRenderedLabelName(aggregate);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         private BridgeResponse RoadGraph(BridgeRequest request)
         {
             if (!TryGetCity(out _, out BridgeResponse error))
@@ -389,6 +414,8 @@ namespace CS2MCP
             request.Query.TryGetValue("query", out string query);
             bool allNets = request.Query.TryGetValue("nets", out string nets)
                 && string.Equals(nets, "all", System.StringComparison.OrdinalIgnoreCase);
+            request.Query.TryGetValue("street", out string streetFilter);
+            Game.UI.NameSystem names = World.GetOrCreateSystemManaged<Game.UI.NameSystem>();
             float2 center = new float2(x, z);
 
             var edgeItems = new List<object>();
@@ -406,6 +433,12 @@ namespace CS2MCP
                     string prefab = PrefabNameOf(edge);
                     if (!string.IsNullOrEmpty(query) && (prefab == null
                         || prefab.IndexOf(query, System.StringComparison.OrdinalIgnoreCase) < 0))
+                    {
+                        continue;
+                    }
+                    string street = StreetNameOf(names, edge);
+                    if (!string.IsNullOrEmpty(streetFilter) && (street == null
+                        || street.IndexOf(streetFilter, System.StringComparison.OrdinalIgnoreCase) < 0))
                     {
                         continue;
                     }
@@ -427,6 +460,7 @@ namespace CS2MCP
                     {
                         road = new { index = edge.Index, version = edge.Version },
                         prefab,
+                        street,
                         startNode = ends.m_Start.Index,
                         endNode = ends.m_End.Index,
                         start = new { x = curve.m_Bezier.a.x, y = curve.m_Bezier.a.y, z = curve.m_Bezier.a.z },

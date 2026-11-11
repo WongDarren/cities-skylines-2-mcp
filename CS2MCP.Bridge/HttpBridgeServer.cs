@@ -183,6 +183,7 @@ namespace CS2MCP
                 || path.EndsWith("/set", StringComparison.Ordinal)
                 || path == "/game/save"
                 || path == "/city/tiles/buy"
+                || path == "/city/devtree/purchase"
                 || path == "/transit/stops/place"
                 || path == "/transit/lines/create"
                 || path == "/transit/lines/delete";
@@ -313,7 +314,9 @@ namespace CS2MCP
                 int equals = pair.IndexOf('=');
                 string key = equals < 0 ? pair : pair.Substring(0, equals);
                 string value = equals < 0 ? "" : pair.Substring(equals + 1);
-                request.Query[Uri.UnescapeDataString(key)] = Uri.UnescapeDataString(value);
+                // Form encoding writes spaces as '+' (a literal '+' arrives as %2B), and
+                // Uri.UnescapeDataString keeps '+' as is, so turn it back into a space first.
+                request.Query[Uri.UnescapeDataString(key.Replace('+', ' '))] = Uri.UnescapeDataString(value.Replace('+', ' '));
             }
         }
 

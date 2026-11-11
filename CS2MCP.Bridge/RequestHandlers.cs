@@ -73,6 +73,10 @@ namespace CS2MCP
                     return GetPolicies();
                 case "/city/policies/set":
                     return HandleSetPolicy(request);
+                case "/city/devtree":
+                    return GetDevTree();
+                case "/city/devtree/purchase":
+                    return PurchaseDevTreeNode(request);
                 case "/city/service-budgets":
                     return GetServiceBudgets();
                 case "/city/service-budgets/set":
@@ -125,6 +129,8 @@ namespace CS2MCP
                     return SimControl(request);
                 case "/sim/run":
                     return SimRun(request);
+                case "/sim/dismiss-popups":
+                    return DismissPopups();
                 case "/game/save":
                     return SaveGame(request);
                 case "/city/tiles":

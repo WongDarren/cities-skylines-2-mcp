@@ -22,7 +22,7 @@ function isMutatingPath(path: string): boolean {
     path.startsWith("/build/") ||
     path.startsWith("/sim/") ||
     path.endsWith("/set") ||
-    ["/game/save", "/city/tiles/buy", "/transit/stops/place", "/transit/lines/create", "/transit/lines/delete"].includes(path)
+    ["/game/save", "/city/tiles/buy", "/city/devtree/purchase", "/transit/stops/place", "/transit/lines/create", "/transit/lines/delete"].includes(path)
   );
 }
 
@@ -58,8 +58,36 @@ async function bridgeJson(path: string, timeoutMs = 12_000): Promise<unknown> {
   return payload;
 }
 
+/** CS2MCP_VERBOSE=1 restores pretty-printed, unabridged tool output. */
+const VERBOSE = process.env.CS2MCP_VERBOSE === "1";
+/** Boilerplate keys the bridge repeats in every reply; they cost tokens and carry no data. */
+const DROP_KEYS = new Set(["note", "stalenessWarning"]);
+
+/**
+ * Shrink a bridge payload for the model: drop boilerplate keys and nulls, and
+ * round fractional numbers (2 decimals below 10, else 1). Coordinates keep
+ * 0.1 m precision, which is finer than any placement needs.
+ */
+function compact(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(compact);
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value)) {
+      if (DROP_KEYS.has(key) || item === null || item === undefined) continue;
+      out[key] = compact(item);
+    }
+    return out;
+  }
+  if (typeof value === "number" && !Number.isInteger(value)) {
+    const scale = Math.abs(value) < 10 ? 100 : 10;
+    return Math.round(value * scale) / scale;
+  }
+  return value;
+}
+
 function jsonResult(payload: unknown) {
-  return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
+  const text = VERBOSE ? JSON.stringify(payload, null, 2) : JSON.stringify(compact(payload));
+  return { content: [{ type: "text" as const, text }] };
 }
 
 function errorResult(err: unknown) {
@@ -166,7 +194,7 @@ server.registerTool(
     if (speed !== undefined) params.set("speed", String(speed));
     if (paused !== undefined) params.set("paused", String(paused));
     try {
-      return jsonResult(await bridgeJson(`/sim/control?${params.toString()}`));
+      return jsonResult(await bridgeJson(`/sim/control?${bridgeQueryString(params)}`));
     } catch (err) {
       return errorResult(err);
     }
@@ -274,7 +302,7 @@ server.registerTool(
     if (parameter !== undefined) params.set("parameter", String(parameter));
     if (samples !== undefined) params.set("samples", String(samples));
     try {
-      return jsonResult(await bridgeJson(`/city/statistics?${params.toString()}`));
+      return jsonResult(await bridgeJson(`/city/statistics?${bridgeQueryString(params)}`));
     } catch (err) {
       return errorResult(err);
     }
@@ -310,6 +338,37 @@ server.registerTool(
 );
 
 registerJsonTool(
+  "cs2_dev_tree",
+  "List the development tree",
+  "The development (progression) tree: available development points and every node with its service, " +
+    "point cost, whether it is purchased, whether its service is unlocked, its prerequisite nodes and " +
+    "whether it is affordable right now. Buy nodes with cs2_buy_dev_node.",
+  "/city/devtree",
+);
+
+server.registerTool(
+  "cs2_buy_dev_node",
+  {
+    title: "Buy a development tree node",
+    description:
+      "Spend development points on one node of the development tree (by name from cs2_dev_tree), the same " +
+      "as clicking it in the game's Progression panel. The game checks points and prerequisites; compare " +
+      "pointsBefore/pointsAfter or re-list cs2_dev_tree to confirm.",
+    inputSchema: {
+      name: z.string().describe("Node name from cs2_dev_tree"),
+    },
+  },
+  async ({ name }) => {
+    const params = new URLSearchParams({ name });
+    try {
+      return jsonResult(await bridgeJson(`/city/devtree/purchase?${bridgeQueryString(params)}`));
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+registerJsonTool(
   "cs2_policies",
   "List city policies",
   "All city-wide policies with their internal name, localized title, active state, locked state and " +
@@ -334,7 +393,7 @@ server.registerTool(
     const params = new URLSearchParams({ name, active: String(active) });
     if (adjustment !== undefined) params.set("adjustment", String(adjustment));
     try {
-      return jsonResult(await bridgeJson(`/city/policies/set?${params.toString()}`));
+      return jsonResult(await bridgeJson(`/city/policies/set?${bridgeQueryString(params)}`));
     } catch (err) {
       return errorResult(err);
     }
@@ -364,7 +423,7 @@ server.registerTool(
   async ({ service, percentage }) => {
     const params = new URLSearchParams({ service, percentage: String(percentage) });
     try {
-      return jsonResult(await bridgeJson(`/city/service-budgets/set?${params.toString()}`));
+      return jsonResult(await bridgeJson(`/city/service-budgets/set?${bridgeQueryString(params)}`));
     } catch (err) {
       return errorResult(err);
     }
@@ -394,7 +453,7 @@ server.registerTool(
     if (query) params.set("query", query);
     if (limit) params.set("limit", String(limit));
     try {
-      return jsonResult(await bridgeJson(`/prefabs?${params.toString()}`));
+      return jsonResult(await bridgeJson(`/prefabs?${bridgeQueryString(params)}`));
     } catch (err) {
       return errorResult(err);
     }
@@ -424,7 +483,7 @@ server.registerTool(
     if (rotation !== undefined) params.set("rotation", String(rotation));
     if (force) params.set("force", "true");
     try {
-      return jsonResult(await bridgeJson(`/build/place?${params.toString()}`, 15_000));
+      return jsonResult(await bridgeJson(`/build/place?${bridgeQueryString(params)}`, 15_000));
     } catch (err) {
       return errorResult(err);
     }
@@ -467,7 +526,7 @@ server.registerTool(
     if (e2 !== undefined) params.set("e2", String(e2));
     if (force) params.set("force", "true");
     try {
-      return jsonResult(await bridgeJson(`/build/road?${params.toString()}`, 15_000));
+      return jsonResult(await bridgeJson(`/build/road?${bridgeQueryString(params)}`, 15_000));
     } catch (err) {
       return errorResult(err);
     }
@@ -491,7 +550,7 @@ server.registerTool(
     if (query) params.set("query", query);
     if (limit) params.set("limit", String(limit));
     try {
-      return jsonResult(await bridgeJson(`/city/buildings?${params.toString()}`));
+      return jsonResult(await bridgeJson(`/city/buildings?${bridgeQueryString(params)}`));
     } catch (err) {
       return errorResult(err);
     }
@@ -527,7 +586,7 @@ server.registerTool(
     if (radius !== undefined) params.set("radius", String(radius));
     if (force) params.set("force", "true");
     try {
-      return jsonResult(await bridgeJson(`/build/zone?${params.toString()}`));
+      return jsonResult(await bridgeJson(`/build/zone?${bridgeQueryString(params)}`));
     } catch (err) {
       return errorResult(err);
     }
@@ -540,20 +599,24 @@ server.registerTool(
     title: "Upgrade a road segment",
     description:
       "Apply upgrades to an existing road segment (from cs2_list_roads): grass, trees, wideSidewalk, " +
-      "soundBarrier, parking, lighting, medianGrass, medianTrees. Combine multiple with commas. " +
+      "soundBarrier, parking, lighting, medianGrass, medianTrees, tram (tram tracks in the road: " +
+      "side=both for a double track, left/right for one; needs a road type that supports trams). " +
+      "Combine multiple with commas; upgrades the segment already has are kept. " +
       "The segment is recreated with the new composition via the game's tool pipeline.",
     inputSchema: {
       index: z.number().int().describe("Road segment entity index"),
       version: z.number().int().describe("Road segment entity version"),
       upgrades: z.string().describe("Comma-separated upgrade names, e.g. 'grass,lighting'"),
       side: z.enum(["both", "left", "right"]).optional().describe("Which side for side upgrades (default both)"),
+      remove: z.boolean().optional().describe("true to remove these upgrades instead of adding them (e.g. the wrong-way tram track on a one-way road)"),
     },
   },
-  async ({ index, version, upgrades, side }) => {
+  async ({ index, version, upgrades, side, remove }) => {
     const params = new URLSearchParams({ index: String(index), version: String(version), upgrades });
     if (side) params.set("side", side);
+    if (remove) params.set("remove", "true");
     try {
-      return jsonResult(await bridgeJson(`/build/upgrade?${params.toString()}`, 15_000));
+      return jsonResult(await bridgeJson(`/build/upgrade?${bridgeQueryString(params)}`, 15_000));
     } catch (err) {
       return errorResult(err);
     }
@@ -583,7 +646,7 @@ server.registerTool(
     if (radius !== undefined) params.set("radius", String(radius));
     if (limit) params.set("limit", String(limit));
     try {
-      return jsonResult(await bridgeJson(`/city/roads?${params.toString()}`));
+      return jsonResult(await bridgeJson(`/city/roads?${bridgeQueryString(params)}`));
     } catch (err) {
       return errorResult(err);
     }
@@ -644,7 +707,7 @@ server.registerTool(
     if (angleY !== undefined) params.set("angleY", String(angleY));
     if (zoom !== undefined) params.set("zoom", String(zoom));
     try {
-      return jsonResult(await bridgeJson(`/camera/set?${params.toString()}`));
+      return jsonResult(await bridgeJson(`/camera/set?${bridgeQueryString(params)}`));
     } catch (err) {
       return errorResult(err);
     }
@@ -666,7 +729,7 @@ server.registerTool(
     const params = new URLSearchParams();
     if (resolution) params.set("resolution", String(resolution));
     try {
-      return jsonResult(await bridgeJson(`/city/terrain?${params.toString()}`, 30_000));
+      return jsonResult(await bridgeJson(`/city/terrain?${bridgeQueryString(params)}`, 30_000));
     } catch (err) {
       return errorResult(err);
     }
@@ -715,7 +778,7 @@ server.registerTool(
     if (zCoord !== undefined) params.set("z", String(zCoord));
     if (radius !== undefined) params.set("radius", String(radius));
     try {
-      return jsonResult(await bridgeJson(`/city/zoning?${params.toString()}`, 20_000));
+      return jsonResult(await bridgeJson(`/city/zoning?${bridgeQueryString(params)}`, 20_000));
     } catch (err) {
       return errorResult(err);
     }
@@ -737,7 +800,7 @@ server.registerTool(
     const params = new URLSearchParams();
     if (limit) params.set("limit", String(limit));
     try {
-      return jsonResult(await bridgeJson(`/city/notifications?${params.toString()}`));
+      return jsonResult(await bridgeJson(`/city/notifications?${bridgeQueryString(params)}`));
     } catch (err) {
       return errorResult(err);
     }
@@ -815,7 +878,7 @@ server.registerTool(
   async ({ resource, fee }) => {
     const params = new URLSearchParams({ resource, fee: String(fee) });
     try {
-      return jsonResult(await bridgeJson(`/city/fees/set?${params.toString()}`));
+      return jsonResult(await bridgeJson(`/city/fees/set?${bridgeQueryString(params)}`));
     } catch (err) {
       return errorResult(err);
     }
@@ -845,7 +908,7 @@ server.registerTool(
     if (radius !== undefined) params.set("radius", String(radius));
     if (limit) params.set("limit", String(limit));
     try {
-      return jsonResult(await bridgeJson(`/city/objects?${params.toString()}`));
+      return jsonResult(await bridgeJson(`/city/objects?${bridgeQueryString(params)}`));
     } catch (err) {
       return errorResult(err);
     }
@@ -859,8 +922,9 @@ server.registerTool(
     description:
       "Unpause and run the simulation at the given speed, auto-pausing after the requested number of " +
       "in-game hours. Returns immediately with the target frame; poll cs2_game_state (frameIndex) to " +
-      "track progress. Use cancel=true to stop early. The core loop for autonomous mayoring: " +
-      "act, run time forward, observe results.",
+      "track progress. Use cancel=true to stop early. Reward popups (milestone reached...) that pause " +
+      "the game during the run are closed automatically so it keeps going. The core loop for " +
+      "autonomous mayoring: act, run time forward, observe results.",
     inputSchema: {
       hours: z.number().min(0.1).max(96).optional().describe("In-game hours to run (required unless cancel)"),
       speed: z.number().min(0.5).max(8).optional().describe("Simulation speed while running (default 4)"),
@@ -873,7 +937,26 @@ server.registerTool(
     if (hours !== undefined) params.set("hours", String(hours));
     if (speed !== undefined) params.set("speed", String(speed));
     try {
-      return jsonResult(await bridgeJson(`/sim/run?${params.toString()}`));
+      return jsonResult(await bridgeJson(`/sim/run?${bridgeQueryString(params)}`));
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
+server.registerTool(
+  "cs2_dismiss_popups",
+  {
+    title: "Close reward popups",
+    description:
+      "Close the game's reward popups (milestone reached, signature building unlocked) by running the same " +
+      "handlers as their Close buttons. Such a popup pauses the game; use this when cs2_game_state stays paused " +
+      "and a screenshot shows one, then unpause with cs2_set_simulation.",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      return jsonResult(await bridgeJson("/sim/dismiss-popups"));
     } catch (err) {
       return errorResult(err);
     }
@@ -895,7 +978,7 @@ server.registerTool(
     const params = new URLSearchParams();
     if (name) params.set("name", name);
     try {
-      return jsonResult(await bridgeJson(`/game/save?${params.toString()}`));
+      return jsonResult(await bridgeJson(`/game/save?${bridgeQueryString(params)}`));
     } catch (err) {
       return errorResult(err);
     }
@@ -932,7 +1015,7 @@ server.registerTool(
     const params = new URLSearchParams({ nodes });
     if (prefab) params.set("prefab", prefab);
     try {
-      return jsonResult(await bridgeJson(`/build/district?${params.toString()}`, 15_000));
+      return jsonResult(await bridgeJson(`/build/district?${bridgeQueryString(params)}`, 15_000));
     } catch (err) {
       return errorResult(err);
     }
@@ -982,7 +1065,7 @@ server.registerTool(
     });
     if (adjustment !== undefined) params.set("adjustment", String(adjustment));
     try {
-      return jsonResult(await bridgeJson(`/district/policies/set?${params.toString()}`));
+      return jsonResult(await bridgeJson(`/district/policies/set?${bridgeQueryString(params)}`));
     } catch (err) {
       return errorResult(err);
     }
@@ -1297,7 +1380,8 @@ server.registerTool(
     description:
       "Road segments in an area with their junction ids (so you can see what connects to what), direction " +
       "(one-way roads run start to end), flow and volume, plus each junction's position, number of roads and " +
-      "whether it has traffic lights or is a roundabout. Use it to plan road changes before cs2_replace_road, " +
+      "whether it has traffic lights or is a roundabout. Each segment carries its street name as the game shows it " +
+      "(e.g. 'Rosecliff Street'); filter by it with street. Use it to plan road changes before cs2_replace_road, " +
       "cs2_build_road or cs2_demolish.",
     inputSchema: {
       x: z.number().describe("Center X"),
@@ -1305,17 +1389,19 @@ server.registerTool(
       radius: z.number().min(1).max(2000).optional().describe("Radius in meters (default 300)"),
       limit: z.number().int().min(1).max(3000).optional().describe("Max road segments (default 400)"),
       query: z.string().optional().describe("Only prefabs whose name contains this"),
+      street: z.string().optional().describe("Only segments whose street name contains this (case-insensitive)"),
       allNets: z
         .boolean()
         .optional()
         .describe("Include every network, not just roads: train/subway/tram tracks (incl. stations' own tracks), paths..."),
     },
   },
-  async ({ x, z: zCoord, radius, limit, query, allNets }) => {
+  async ({ x, z: zCoord, radius, limit, query, street, allNets }) => {
     const params = new URLSearchParams({ x: String(x), z: String(zCoord) });
     if (radius !== undefined) params.set("radius", String(radius));
     if (limit) params.set("limit", String(limit));
     if (query) params.set("query", query);
+    if (street) params.set("street", street);
     if (allNets) params.set("nets", "all");
     try {
       return jsonResult(await bridgeJson(`/city/road-graph?${bridgeQueryString(params)}`));
@@ -1649,6 +1735,274 @@ server.registerTool(
     } catch (err) {
       return errorResult(err);
     }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Token-saving tools: one compact city digest and batched build operations.
+// ---------------------------------------------------------------------------
+
+/** Notification types that are routine progress, not problems. */
+const ROUTINE_NOTIFICATIONS = new Set(["Leveling Building", "Building Level Up", "Selected"]);
+
+type Json = Record<string, any>;
+
+const pct = (used: number, cap: number) => (cap > 0 ? Math.round((used / cap) * 100) : null);
+const xz = (p: Json | undefined) => (p ? `${Math.round(p.x)},${Math.round(p.z)}` : "?");
+
+server.registerTool(
+  "cs2_city_digest",
+  {
+    title: "City digest (one-call review)",
+    description:
+      "Everything a city review needs in one compact reply: date/speed, population, happiness, health, money, " +
+      "budget, power/water/sewage load (%), garbage, residential/commercial/industrial/office demand with the " +
+      "strongest factors, zone fill, unspent development points and affordable nodes, problem warnings grouped by " +
+      "type with a few locations (routine 'leveling' icons left out), city traffic flow with the worst roads, and " +
+      "transit line ridership. Use this instead of calling the individual status tools one by one.",
+    inputSchema: {
+      warningLocations: z.number().int().min(0).max(20).optional().describe("Locations listed per warning type (default 4)"),
+      worstRoads: z.number().int().min(0).max(25).optional().describe("Worst roads to list (default 6)"),
+    },
+  },
+  async ({ warningLocations, worstRoads }) => {
+    const perType = warningLocations ?? 4;
+    const roadCount = worstRoads ?? 6;
+    const paths = {
+      state: "/state",
+      overview: "/city/overview",
+      budget: "/city/budget",
+      services: "/city/services",
+      demand: "/city/demand",
+      zoning: "/city/zoning",
+      devtree: "/city/devtree",
+      notifications: "/city/notifications?limit=500",
+      traffic: `/city/traffic?limit=${Math.max(roadCount, 1)}&minVolume=50`,
+      lines: "/transit/lines",
+    } as const;
+    const keys = Object.keys(paths) as (keyof typeof paths)[];
+    const settled = await Promise.allSettled(keys.map((k) => bridgeJson(paths[k], 20_000)));
+    const got: Partial<Record<keyof typeof paths, Json>> = {};
+    const failed: string[] = [];
+    settled.forEach((r, i) => {
+      if (r.status === "fulfilled") got[keys[i]] = r.value as Json;
+      else failed.push(`${keys[i]}: ${(r.reason as Error).message}`);
+    });
+    if (!got.overview) return errorResult(new Error(`digest failed: ${failed.join("; ")}`));
+
+    const o = got.overview;
+    const sim = got.state?.simulation ?? {};
+    const digest: Json = {
+      date: o.gameDateTime,
+      sim: sim.paused ? "paused" : `x${sim.selectedSpeed}`,
+      pop: o.population,
+      movingIn: (o.populationWithMoveIn ?? o.population) - o.population,
+      happiness: o.averageHappiness,
+      health: o.averageHealth,
+      money: Math.round(o.money),
+      xp: o.xp,
+    };
+
+    const b = got.budget;
+    if (b) {
+      digest.budget = {
+        income: Math.round(b.totalIncome),
+        expenses: Math.round(Math.abs(b.totalExpenses)),
+        balance: Math.round(b.balance),
+        loanInterest: Math.round(b.expenses?.LoanInterest ?? 0),
+      };
+    }
+
+    const s = got.services;
+    if (s) {
+      const e = s.electricity ?? {};
+      const w = s.water ?? {};
+      digest.utilities = {
+        powerMW: `${Math.round((e.consumption ?? 0) / 1000)}/${Math.round((e.production ?? 0) / 1000)} (${pct(e.consumption, e.production)}%)`,
+        powerUnmet: Math.round(((e.consumption ?? 0) - (e.fulfilledConsumption ?? 0)) / 1000) || undefined,
+        water: `${Math.round((w.freshConsumption ?? 0) / 1000)}k/${Math.round((w.freshCapacity ?? 0) / 1000)}k (${pct(w.freshConsumption, w.freshCapacity)}%)`,
+        sewage: `${Math.round((w.sewageConsumption ?? 0) / 1000)}k/${Math.round((w.sewageCapacity ?? 0) / 1000)}k (${pct(w.sewageConsumption, w.sewageCapacity)}%)`,
+        imports: (e.import || w.freshImport) ? { power: e.import, water: w.freshImport } : undefined,
+        garbageRate: Math.round(s.garbage?.accumulationRate ?? 0),
+      };
+    }
+
+    const d = got.demand;
+    if (d) {
+      const strong = (factors: Json | undefined) =>
+        Object.entries(factors ?? {})
+          .filter(([, v]) => Math.abs(Number(v)) >= 40)
+          .map(([k, v]) => `${k} ${v}`)
+          .join(", ") || undefined;
+      const r = d.residential ?? {};
+      digest.demand = {
+        res: r.buildingDemand,
+        resFactors: strong(r.factors?.mediumDensity),
+        com: d.commercial?.buildingDemand,
+        comFactors: strong(d.commercial?.factors),
+        ind: d.industrial?.buildingDemand,
+        indFactors: strong(d.industrial?.factors),
+        off: d.office?.buildingDemand,
+        offFactors: strong(d.office?.factors),
+      };
+    }
+
+    const zn = got.zoning;
+    if (zn?.byZone) {
+      const zones: Json = {};
+      for (const [name, v] of Object.entries(zn.byZone as Json)) {
+        zones[name] = `${pct(v.occupied, v.cells)}% of ${v.cells} (${v.empty} empty)`;
+      }
+      digest.zones = zones;
+    }
+
+    const dt = got.devtree;
+    if (dt) {
+      const pts = dt.points ?? 0;
+      digest.devPoints = pts;
+      if (pts > 0) {
+        digest.devAffordable = (dt.nodes ?? [])
+          .filter((n: Json) => !n.purchased && n.allRequirementsPurchased && n.cost <= pts)
+          .map((n: Json) => `${n.name}(${n.cost})`);
+      }
+    }
+
+    const nt = got.notifications;
+    if (nt) {
+      const byType: Json = {};
+      for (const [type, count] of Object.entries((nt.countsByType ?? {}) as Json)) {
+        if (ROUTINE_NOTIFICATIONS.has(type)) continue;
+        byType[type] = { n: count, at: [] as string[] };
+      }
+      for (const item of (nt.notifications ?? []) as Json[]) {
+        const slot = byType[item.type];
+        if (slot && slot.at.length < perType) slot.at.push(xz(item.location));
+      }
+      digest.warnings = Object.fromEntries(
+        Object.entries(byType).map(([t, v]) => [t, perType > 0 ? `${v.n} @ ${v.at.join(" ")}` : v.n]),
+      );
+    }
+
+    const tr = got.traffic;
+    if (tr) {
+      digest.traffic = {
+        flow: tr.cityTrafficFlowPercent,
+        under25: tr.congestedRoads?.below25Percent,
+        bottlenecks: tr.bottlenecks?.count,
+        worst: ((tr.worstRoads ?? []) as Json[])
+          .slice(0, roadCount)
+          .map((r) => `${r.prefab} ${xz(r.start)}->${xz(r.end)} ${r.flowPercent}% v${Math.round(r.volume)}`),
+      };
+    }
+
+    const ln = got.lines;
+    if (ln?.lines) {
+      digest.transit = (ln.lines as Json[]).map(
+        (l) => `${l.name}: ${l.vehicles} veh, ${l.passengersOnBoard} pax, ${Math.round((l.usage ?? 0) * 100)}%${l.active ? "" : " INACTIVE"}`,
+      );
+    }
+
+    if (failed.length) digest.unavailable = failed;
+    return { content: [{ type: "text" as const, text: VERBOSE ? JSON.stringify(digest, null, 2) : JSON.stringify(digest) }] };
+  },
+);
+
+const segRef = z.object({ index: z.number().int(), version: z.number().int() });
+
+const batchOp = z.discriminatedUnion("op", [
+  z.object({ op: z.literal("upgrade"), index: z.number().int(), version: z.number().int(), upgrades: z.string(),
+    side: z.enum(["both", "left", "right"]).optional(), remove: z.boolean().optional() }),
+  z.object({ op: z.literal("replace"), roads: z.array(segRef).min(1).max(50), prefab: z.string(), invert: z.boolean().optional() }),
+  z.object({ op: z.literal("zone"), zone: z.string(), x: z.number(), z: z.number(), radius: z.number().optional() }),
+  z.object({ op: z.literal("connect"), prefab: z.string(), x1: z.number(), z1: z.number(), x2: z.number(), z2: z.number(),
+    snap: z.number().optional(), cx: z.number().optional(), cz: z.number().optional(), e1: z.number().optional(), e2: z.number().optional() }),
+  z.object({ op: z.literal("demolish"), index: z.number().int(), version: z.number().int() }),
+  z.object({ op: z.literal("junction"), index: z.number().int(), version: z.number().int(), mode: z.enum(["lights", "nolights", "stop", "default"]) }),
+  z.object({ op: z.literal("roadside"), prefab: z.string(), road: segRef, side: z.enum(["left", "right"]), t: z.number().optional(), gap: z.number().optional() }),
+  z.object({ op: z.literal("stop"), type: z.enum(["bus", "tram"]), x: z.number(), z: z.number(), prefab: z.string().optional(), radius: z.number().optional() }),
+  z.object({ op: z.literal("place"), prefab: z.string(), x: z.number(), z: z.number(), rotation: z.number().optional() }),
+]);
+type BatchOp = z.infer<typeof batchOp>;
+
+/** Bridge path and query for one batch operation. */
+function batchRequest(op: BatchOp): string {
+  const p = new URLSearchParams();
+  const set = (k: string, v: unknown) => { if (v !== undefined) p.set(k, String(v)); };
+  let path: string;
+  switch (op.op) {
+    case "upgrade": path = "/build/upgrade"; set("index", op.index); set("version", op.version); set("upgrades", op.upgrades);
+      set("side", op.side); if (op.remove) set("remove", "true"); break;
+    case "replace": path = "/build/road/replace"; set("roads", op.roads.map((r) => `${r.index}:${r.version}`).join(";"));
+      set("prefab", op.prefab); set("invert", op.invert); break;
+    case "zone": path = "/build/zone"; set("zone", op.zone); set("x", op.x); set("z", op.z); set("radius", op.radius); break;
+    case "connect": path = "/build/road/connect"; for (const k of ["prefab", "x1", "z1", "x2", "z2", "snap", "cx", "cz", "e1", "e2"] as const) set(k, op[k]); break;
+    case "demolish": path = "/build/demolish"; set("index", op.index); set("version", op.version); break;
+    case "junction": path = "/build/junction"; set("index", op.index); set("version", op.version); set("mode", op.mode); break;
+    case "roadside": path = "/build/place/roadside"; set("prefab", op.prefab); set("road", `${op.road.index}:${op.road.version}`);
+      set("side", op.side); set("t", op.t); set("gap", op.gap); break;
+    case "stop": path = "/transit/stops/place"; set("type", op.type); set("x", op.x); set("z", op.z); set("prefab", op.prefab); set("radius", op.radius); break;
+    case "place": path = "/build/place"; set("prefab", op.prefab); set("x", op.x); set("z", op.z); set("rotation", op.rotation); break;
+  }
+  return `${path}?${bridgeQueryString(p)}`;
+}
+
+/** One-line result: just the ids and numbers needed for follow-up calls. */
+function batchSummary(op: BatchOp, r: Json): string {
+  switch (op.op) {
+    case "stop": return `stop ${r.stop?.index}:${r.stop?.version} @${xz(r.position)}`;
+    case "connect": return `segs ${((r.segments ?? []) as Json[]).map((s) => `${s.road.index}:${s.road.version}`).join(",") || "none(nothing built?)"}`;
+    case "zone": return `${r.cellsChanged} cells`;
+    case "replace": return `${r.replaced} replaced`;
+    case "roadside": case "place": return `${r.prefab ?? op.prefab} @${xz(r.position)}`;
+    case "demolish": return `removed ${r.prefab}`;
+    default: return "ok";
+  }
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+server.registerTool(
+  "cs2_batch",
+  {
+    title: "Batch build operations",
+    description:
+      "Run many build operations in one call, in order (the game applies one build at a time; this waits and " +
+      "retries while the previous one finishes). Ops: upgrade (road upgrades incl. tram, remove=true to take off), " +
+      "replace (road type), zone, connect (road/track/pipe/path), demolish, junction (lights/nolights/stop), " +
+      "roadside (building flush to a road), stop (bus/tram stop), place (building at x,z). Returns one short line per " +
+      "op with the new ids. Same semantics and costs as the single-op tools.",
+    inputSchema: {
+      ops: z.array(batchOp).min(1).max(60).describe("Operations, run in order"),
+      stopOnError: z.boolean().optional().describe("Stop at the first failed op (default false: continue)"),
+    },
+  },
+  async ({ ops, stopOnError }) => {
+    const lines: string[] = [];
+    let ok = 0;
+    for (let i = 0; i < ops.length; i++) {
+      const op = ops[i];
+      let line = "";
+      for (let attempt = 0; attempt < 12; attempt++) {
+        try {
+          const r = (await bridgeJson(batchRequest(op), 20_000)) as Json;
+          line = `#${i} ${op.op} ok: ${batchSummary(op, r)}`;
+          ok++;
+          break;
+        } catch (err) {
+          const msg = (err as Error).message;
+          if (/in progress|retry shortly/i.test(msg) && attempt < 11) {
+            await sleep(500);
+            continue;
+          }
+          line = `#${i} ${op.op} FAILED: ${msg.slice(0, 160)}`;
+          break;
+        }
+      }
+      lines.push(line);
+      if (stopOnError && line.includes("FAILED")) break;
+    }
+    lines.unshift(`${ok}/${ops.length} ok`);
+    return { content: [{ type: "text" as const, text: lines.join("\n") }] };
   },
 );
 

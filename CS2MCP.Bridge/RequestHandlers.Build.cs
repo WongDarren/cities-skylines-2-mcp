@@ -395,6 +395,9 @@ namespace CS2MCP
                 ["lighting"] = (Game.Prefabs.CompositionFlags.General.Lighting, default),
                 ["medianGrass"] = (Game.Prefabs.CompositionFlags.General.PrimaryMiddleBeautification, default),
                 ["medianTrees"] = (Game.Prefabs.CompositionFlags.General.SecondaryMiddleBeautification, default),
+                // Tram tracks in the road, as the Tram Track tool does when drawn over a road:
+                // a track per side (side=both gives a double track, left/right a single one).
+                ["tram"] = (default, Game.Prefabs.CompositionFlags.Side.PrimaryTrack),
             };
 
         private BridgeResponse HandleUpgradeRoad(BridgeRequest request)
@@ -437,6 +440,27 @@ namespace CS2MCP
                 {
                     flags.m_Right |= mapped.side;
                 }
+            }
+
+            // The definition's Upgraded flags become the segment's final flags, so start
+            // from the upgrades it already has (trees, lighting, tram tracks...) and add
+            // the requested ones, or with remove=true take them away.
+            Game.Prefabs.CompositionFlags existing = EntityManager.HasComponent<Game.Net.Upgraded>(entity)
+                ? EntityManager.GetComponentData<Game.Net.Upgraded>(entity).m_Flags
+                : default;
+            bool remove = request.Query.TryGetValue("remove", out string rawRemove)
+                && (rawRemove == "1" || string.Equals(rawRemove, "true", StringComparison.OrdinalIgnoreCase));
+            if (remove)
+            {
+                flags.m_General = existing.m_General & ~flags.m_General;
+                flags.m_Left = existing.m_Left & ~flags.m_Left;
+                flags.m_Right = existing.m_Right & ~flags.m_Right;
+            }
+            else
+            {
+                flags.m_General |= existing.m_General;
+                flags.m_Left |= existing.m_Left;
+                flags.m_Right |= existing.m_Right;
             }
 
             PrefabSystem prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();

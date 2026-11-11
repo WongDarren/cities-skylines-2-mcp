@@ -318,34 +318,49 @@ namespace CS2MCP
             TerrainHeightData terrain = World.GetOrCreateSystemManaged<TerrainSystem>().GetHeightData();
             float3 hit = new float3(x, TerrainUtils.SampleHeight(ref terrain, new float3(x, 0f, z)), z);
 
-            // Port of SnapShoreline.
-            int2 min = (int2)math.floor(WaterUtils.ToSurfaceSpace(ref water, hit - radius).xz);
-            int2 max = (int2)math.ceil(WaterUtils.ToSurfaceSpace(ref water, hit + radius).xz);
-            min = math.max(min, default(int2));
-            max = math.min(max, water.resolution.xz - 1);
+            // Port of SnapShoreline. Small buildings (sewage outlets) have a snap radius smaller
+            // than the water grid spacing, so a point rarely has both a wet and a dry cell in range;
+            // the game's tool gets away with it because the player moves the cursor until it does.
+            // Widen the search in steps until both sides of the shore are found.
             float3 dry = default;
             float3 wet = default;
             float2 surface = default;
-            for (int row = min.y; row <= max.y; row++)
+            float gameRadius = radius;
+            foreach (float tryRadius in new[] { gameRadius, math.max(gameRadius, 24f), math.max(gameRadius, 40f) })
             {
-                for (int col = min.x; col <= max.x; col++)
+                radius = tryRadius;
+                dry = default;
+                wet = default;
+                surface = default;
+                int2 min = (int2)math.floor(WaterUtils.ToSurfaceSpace(ref water, hit - radius).xz);
+                int2 max = (int2)math.ceil(WaterUtils.ToSurfaceSpace(ref water, hit + radius).xz);
+                min = math.max(min, default(int2));
+                max = math.min(max, water.resolution.xz - 1);
+                for (int row = min.y; row <= max.y; row++)
                 {
-                    float3 cell = WaterUtils.GetWorldPosition(ref water, new int2(col, row));
-                    float weight = math.max(0f, radius * radius - math.distancesq(cell.xz, hit.xz));
-                    if (cell.y > 0.2f)
+                    for (int col = min.x; col <= max.x; col++)
                     {
-                        float height = TerrainUtils.SampleHeight(ref terrain, cell) + cell.y;
-                        cell.y = (cell.y - 0.2f) * weight;
-                        cell.xz *= cell.y;
-                        wet += cell;
-                        surface += new float2(height * weight, weight);
+                        float3 cell = WaterUtils.GetWorldPosition(ref water, new int2(col, row));
+                        float weight = math.max(0f, radius * radius - math.distancesq(cell.xz, hit.xz));
+                        if (cell.y > 0.2f)
+                        {
+                            float height = TerrainUtils.SampleHeight(ref terrain, cell) + cell.y;
+                            cell.y = (cell.y - 0.2f) * weight;
+                            cell.xz *= cell.y;
+                            wet += cell;
+                            surface += new float2(height * weight, weight);
+                        }
+                        else if (cell.y < 0.2f)
+                        {
+                            cell.y = (0.2f - cell.y) * weight;
+                            cell.xz *= cell.y;
+                            dry += cell;
+                        }
                     }
-                    else if (cell.y < 0.2f)
-                    {
-                        cell.y = (0.2f - cell.y) * weight;
-                        cell.xz *= cell.y;
-                        dry += cell;
-                    }
+                }
+                if (dry.y != 0f && wet.y != 0f && surface.y != 0f)
+                {
+                    break;
                 }
             }
             if (dry.y == 0f || wet.y == 0f || surface.y == 0f)
