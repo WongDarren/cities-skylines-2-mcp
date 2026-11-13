@@ -53,8 +53,8 @@ namespace CS2MCP
             NetData netData = EntityManager.GetComponentData<NetData>(prefabEntity);
 
             TerrainHeightData heightData = World.GetOrCreateSystemManaged<TerrainSystem>().GetHeightData();
-            BridgeRoadToolSystem.BuildEnd start = ResolveBuildEnd(new float2(x1, z1), snap, netData, ref heightData);
-            BridgeRoadToolSystem.BuildEnd end = ResolveBuildEnd(new float2(x2, z2), snap, netData, ref heightData);
+            BridgeRoadToolSystem.BuildEnd start = ResolveBuildEnd(new float2(x1, z1), new float2(x2, z2), snap, netData, ref heightData);
+            BridgeRoadToolSystem.BuildEnd end = ResolveBuildEnd(new float2(x2, z2), new float2(x1, z1), snap, netData, ref heightData);
             // Free ends can be raised (bridges, flyovers) or lowered (tunnels); snapped ends keep the height of what they join.
             if (start.Entity == Entity.Null && request.TryGetFloat("e1", out float e1))
             {
@@ -118,7 +118,7 @@ namespace CS2MCP
         /// on the terrain. Compatible = the networks' layers can connect (so a
         /// track never joins a road).
         /// </summary>
-        private BridgeRoadToolSystem.BuildEnd ResolveBuildEnd(float2 point, float snap, NetData netData, ref TerrainHeightData heightData)
+        private BridgeRoadToolSystem.BuildEnd ResolveBuildEnd(float2 point, float2 toward, float snap, NetData netData, ref TerrainHeightData heightData)
         {
             Entity bestNode = Entity.Null;
             float bestNodeDistance = snap;
@@ -177,7 +177,7 @@ namespace CS2MCP
             // is such a node: a sub-net node of a transformer, power plant,
             // pumping station... whose prefab carries e.g. ElectricityConnectionData,
             // and which the player's power line or pipe snaps to.
-            FindConnectionNode(point, netData, ref bestNode, ref bestNodeDistance, bestEdge == Entity.Null, out Entity connectionBuilding);
+            FindConnectionNode(point, toward, netData, ref bestNode, ref bestNodeDistance, bestEdge == Entity.Null, out Entity connectionBuilding);
 
             var result = new BridgeRoadToolSystem.BuildEnd();
             result.Building = connectionBuilding;
@@ -265,7 +265,7 @@ namespace CS2MCP
         /// point, so a power line can be connected by naming the building's
         /// position.
         /// </summary>
-        private void FindConnectionNode(float2 point, NetData netData, ref Entity bestNode, ref float bestNodeDistance,
+        private void FindConnectionNode(float2 point, float2 toward, NetData netData, ref Entity bestNode, ref float bestNodeDistance,
             bool allowBuildingFallback, out Entity connectionBuilding)
         {
             connectionBuilding = Entity.Null;
@@ -310,12 +310,12 @@ namespace CS2MCP
                         allowBuildingFallback = false;
                         continue;
                     }
-                    if (allowBuildingFallback && bestNode == Entity.Null && distance < fallbackDistance)
+                    if (allowBuildingFallback && bestNode == Entity.Null && math.distance(EntityManager.GetComponentData<Node>(node).m_Position.xz, toward) < fallbackDistance)
                     {
                         Entity building = OwningBuilding(node);
                         if (building != Entity.Null && OnBuildingLot(node, point))
                         {
-                            fallbackDistance = distance;
+                            fallbackDistance = math.distance(EntityManager.GetComponentData<Node>(node).m_Position.xz, toward);
                             fallbackNode = node;
                             fallbackBuilding = building;
                         }
@@ -325,7 +325,7 @@ namespace CS2MCP
             if (allowBuildingFallback && bestNode == Entity.Null && fallbackNode != Entity.Null)
             {
                 bestNode = fallbackNode;
-                bestNodeDistance = fallbackDistance;
+                bestNodeDistance = math.distance(EntityManager.GetComponentData<Node>(fallbackNode).m_Position.xz, point);
                 connectionBuilding = fallbackBuilding;
             }
         }
