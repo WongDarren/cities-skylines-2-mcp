@@ -53,8 +53,8 @@ namespace CS2MCP
             NetData netData = EntityManager.GetComponentData<NetData>(prefabEntity);
 
             TerrainHeightData heightData = World.GetOrCreateSystemManaged<TerrainSystem>().GetHeightData();
-            BridgeRoadToolSystem.BuildEnd start = ResolveBuildEnd(new float2(x1, z1), snap, netData, ref heightData);
-            BridgeRoadToolSystem.BuildEnd end = ResolveBuildEnd(new float2(x2, z2), snap, netData, ref heightData);
+            BridgeRoadToolSystem.BuildEnd start = ResolveBuildEnd(new float2(x1, z1), new float2(x2, z2), snap, netData, ref heightData);
+            BridgeRoadToolSystem.BuildEnd end = ResolveBuildEnd(new float2(x2, z2), new float2(x1, z1), snap, netData, ref heightData);
             // Free ends can be raised (bridges, flyovers) or lowered (tunnels); snapped ends keep the height of what they join.
             if (start.Entity == Entity.Null && request.TryGetFloat("e1", out float e1))
             {
@@ -118,7 +118,7 @@ namespace CS2MCP
         /// on the terrain. Compatible = the networks' layers can connect (so a
         /// track never joins a road).
         /// </summary>
-        private BridgeRoadToolSystem.BuildEnd ResolveBuildEnd(float2 point, float snap, NetData netData, ref TerrainHeightData heightData)
+        private BridgeRoadToolSystem.BuildEnd ResolveBuildEnd(float2 point, float2 toward, float snap, NetData netData, ref TerrainHeightData heightData)
         {
             Entity bestNode = Entity.Null;
             float bestNodeDistance = snap;
@@ -156,6 +156,12 @@ namespace CS2MCP
                             bestNode = node;
                         }
                     }
+                    if (!AllowEdgeSplit(edge))
+                    {
+                        // Like the net tool: a segment owned by a building or asset
+                        // (one of its sub-nets) can only be joined at its end nodes.
+                        continue;
+                    }
                     float edgeDistance = MathUtils.Distance(curve.xz, point, out float t);
                     if (edgeDistance < bestEdgeDistance)
                     {
@@ -166,7 +172,15 @@ namespace CS2MCP
                 }
             }
 
+            // Orphan nodes (no segment starts or ends there) are never reached
+            // through the segments above. A building's network connection point
+            // is such a node: a sub-net node of a transformer, power plant,
+            // pumping station... whose prefab carries e.g. ElectricityConnectionData,
+            // and which the player's power line or pipe snaps to.
+            FindConnectionNode(point, toward, netData, ref bestNode, ref bestNodeDistance, bestEdge == Entity.Null, out Entity connectionBuilding);
+
             var result = new BridgeRoadToolSystem.BuildEnd();
+            result.Building = connectionBuilding;
             if (bestNode == Entity.Null && bestEdge != Entity.Null && (bestT < 0.02f || bestT > 0.98f))
             {
                 Edge ends = EntityManager.GetComponentData<Edge>(bestEdge);
@@ -195,6 +209,185 @@ namespace CS2MCP
                 result.Position.y = TerrainUtils.SampleHeight(ref heightData, result.Position);
             }
             return result;
+        }
+
+        /// <summary>
+        /// Mirrors NetToolSystem.SnapJob.NetIterator.HandleCurve: outside the
+        /// editor, a segment owned by anything but an unowned segment (i.e. a
+        /// building's or asset's sub-net) cannot be split mid-way.
+        /// </summary>
+        private bool AllowEdgeSplit(Entity edge)
+        {
+            if (!EntityManager.HasComponent<Owner>(edge))
+            {
+                return true;
+            }
+            Entity owner = EntityManager.GetComponentData<Owner>(edge).m_Owner;
+            return EntityManager.HasComponent<Edge>(owner) && !EntityManager.HasComponent<Owner>(owner);
+        }
+
+        private EntityQuery m_NetNodeQuery;
+        private bool m_NetNodeQueryCreated;
+
+        /// <summary>Every network node with its connected-edge buffer.</summary>
+        private EntityQuery NetNodeQuery
+        {
+            get
+            {
+                if (!m_NetNodeQueryCreated)
+                {
+                    m_NetNodeQuery = EntityManager.CreateEntityQuery(new EntityQueryDesc
+                    {
+                        All = new[]
+                        {
+                            ComponentType.ReadOnly<Node>(),
+                            ComponentType.ReadOnly<PrefabRef>(),
+                            ComponentType.ReadOnly<ConnectedEdge>(),
+                        },
+                        None = new[]
+                        {
+                            ComponentType.ReadOnly<Deleted>(),
+                            ComponentType.ReadOnly<Temp>(),
+                        },
+                    });
+                    m_NetNodeQueryCreated = true;
+                }
+                return m_NetNodeQuery;
+            }
+        }
+
+        /// <summary>
+        /// Orphan nodes of a compatible network (NetToolSystem.SnapJob snaps to
+        /// these through HandleGeometry): within snap distance they compete with
+        /// the other junctions by distance. When nothing else is in range
+        /// (allowBuildingFallback) and the point lies on the lot of a building
+        /// that owns such a node, the end snaps to that building's connection
+        /// point, so a power line can be connected by naming the building's
+        /// position.
+        /// </summary>
+        private void FindConnectionNode(float2 point, float2 toward, NetData netData, ref Entity bestNode, ref float bestNodeDistance,
+            bool allowBuildingFallback, out Entity connectionBuilding)
+        {
+            connectionBuilding = Entity.Null;
+            Entity fallbackNode = Entity.Null;
+            Entity fallbackBuilding = Entity.Null;
+            float fallbackDistance = float.MaxValue;
+            using (NativeArray<Entity> nodes = NetNodeQuery.ToEntityArray(Allocator.Temp))
+            {
+                foreach (Entity node in nodes)
+                {
+                    DynamicBuffer<ConnectedEdge> connected = EntityManager.GetBuffer<ConnectedEdge>(node, isReadOnly: true);
+                    bool orphan = true;
+                    for (int i = 0; i < connected.Length; i++)
+                    {
+                        Edge ends = EntityManager.GetComponentData<Edge>(connected[i].m_Edge);
+                        if (ends.m_Start == node || ends.m_End == node)
+                        {
+                            orphan = false;
+                            break;
+                        }
+                    }
+                    if (!orphan)
+                    {
+                        continue;
+                    }
+                    Entity nodePrefab = EntityManager.GetComponentData<PrefabRef>(node).m_Prefab;
+                    if (!EntityManager.HasComponent<NetData>(nodePrefab))
+                    {
+                        continue;
+                    }
+                    NetData other = EntityManager.GetComponentData<NetData>(nodePrefab);
+                    if ((netData.m_ConnectLayers & other.m_RequiredLayers) == 0 && (other.m_ConnectLayers & netData.m_RequiredLayers) == 0)
+                    {
+                        continue;
+                    }
+                    float distance = math.distance(EntityManager.GetComponentData<Node>(node).m_Position.xz, point);
+                    if (distance < bestNodeDistance)
+                    {
+                        bestNodeDistance = distance;
+                        bestNode = node;
+                        connectionBuilding = OwningBuilding(node);
+                        allowBuildingFallback = false;
+                        continue;
+                    }
+                    if (allowBuildingFallback && bestNode == Entity.Null && math.distance(EntityManager.GetComponentData<Node>(node).m_Position.xz, toward) < fallbackDistance)
+                    {
+                        Entity building = OwningBuilding(node);
+                        if (building != Entity.Null && OnBuildingLot(node, point))
+                        {
+                            fallbackDistance = math.distance(EntityManager.GetComponentData<Node>(node).m_Position.xz, toward);
+                            fallbackNode = node;
+                            fallbackBuilding = building;
+                        }
+                    }
+                }
+            }
+            if (allowBuildingFallback && bestNode == Entity.Null && fallbackNode != Entity.Null)
+            {
+                bestNode = fallbackNode;
+                bestNodeDistance = math.distance(EntityManager.GetComponentData<Node>(fallbackNode).m_Position.xz, point);
+                connectionBuilding = fallbackBuilding;
+            }
+        }
+
+        /// <summary>The top-level object (building) in a sub-net's owner chain, or Null.</summary>
+        private Entity OwningBuilding(Entity entity)
+        {
+            Entity owner = Entity.Null;
+            for (int depth = 0; depth < 8 && EntityManager.HasComponent<Owner>(entity); depth++)
+            {
+                entity = EntityManager.GetComponentData<Owner>(entity).m_Owner;
+                if (!EntityManager.Exists(entity))
+                {
+                    break;
+                }
+                if (EntityManager.HasComponent<Game.Objects.Transform>(entity))
+                {
+                    owner = entity;
+                }
+            }
+            return owner;
+        }
+
+        /// <summary>Whether the point is on the lot of a building or extension in the node's owner chain.</summary>
+        private bool OnBuildingLot(Entity node, float2 point)
+        {
+            Entity entity = node;
+            for (int depth = 0; depth < 8 && EntityManager.HasComponent<Owner>(entity); depth++)
+            {
+                entity = EntityManager.GetComponentData<Owner>(entity).m_Owner;
+                if (!EntityManager.Exists(entity))
+                {
+                    break;
+                }
+                if (!EntityManager.HasComponent<Game.Objects.Transform>(entity) || !EntityManager.HasComponent<PrefabRef>(entity))
+                {
+                    continue;
+                }
+                Entity prefab = EntityManager.GetComponentData<PrefabRef>(entity).m_Prefab;
+                int2 lot;
+                if (EntityManager.HasComponent<BuildingData>(prefab))
+                {
+                    lot = EntityManager.GetComponentData<BuildingData>(prefab).m_LotSize;
+                }
+                else if (EntityManager.HasComponent<BuildingExtensionData>(prefab))
+                {
+                    lot = EntityManager.GetComponentData<BuildingExtensionData>(prefab).m_LotSize;
+                }
+                else
+                {
+                    continue;
+                }
+                Game.Objects.Transform transform = EntityManager.GetComponentData<Game.Objects.Transform>(entity);
+                float3 offset = new float3(point.x, transform.m_Position.y, point.y) - transform.m_Position;
+                float3 local = math.mul(math.inverse(transform.m_Rotation), offset);
+                // Lot sizes are in 8m cells; allow a few meters beyond the edge.
+                if (math.abs(local.x) <= lot.x * 4f + 4f && math.abs(local.z) <= lot.y * 4f + 4f)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private BridgeResponse ReplaceRoad(BridgeRequest request)

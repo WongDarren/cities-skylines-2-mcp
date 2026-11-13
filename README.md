@@ -120,6 +120,7 @@ Start the game, load a save, then ask Claude: "How are my city's finances?", "Zo
 | `cs2_vehicles` | Census of driving vehicles by type and destination, what stopped vehicles wait for, the queue heads holding traffic up and any gridlock loops |
 | `cs2_road_graph` | Road segments of an area with their junctions, direction, flow and traffic lights (optionally every network, incl. station tracks) |
 | `cs2_inspect` | Single-entity detail (residents/employees/status flags) |
+| `cs2_milestones` | Current milestone and XP, XP needed for the next one, and every milestone's XP threshold and rewards (money, loan limit, development points, map tiles) |
 
 **Construction**
 
@@ -131,7 +132,7 @@ Start the game, load a save, then ask Claude: "How are my city's finances?", "Zo
 | `cs2_upgrade_road` | Road upgrades: grass/trees/wide sidewalk/sound barrier/parking/lighting/median |
 | `cs2_set_junction_control` | Set a junction to traffic lights, no lights, an all-way stop or the game default (the intersection tools' node upgrades) |
 | `cs2_replace_road` | Change the road type of existing segments in place (the road tool's Replace mode): widen a highway, make a street one-way |
-| `cs2_connect_road` | Build a road or track whose ends snap to existing junctions or split existing segments (like the road tool's snapping), optionally raised or lowered |
+| `cs2_connect_road` | Build a road or track whose ends snap to existing junctions or split existing segments (like the road tool's snapping), optionally raised or lowered; power lines and pipes also snap to a building's connection point (transformer, power plant, pumping station...) when an end is on its lot |
 | `cs2_prefab_info` | Footprint, size, placement rules and cost of a building, or width and layers of a network |
 | `cs2_place_shoreline` | Place a harbor, pump or other shoreline building on the water's edge, snapped like the game's placement tool |
 | `cs2_place_roadside` | Place a station, depot or service building flush against a road segment, facing it |

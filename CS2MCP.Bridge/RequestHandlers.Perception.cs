@@ -488,6 +488,69 @@ namespace CS2MCP
                 result["employees"] = EntityManager.GetBuffer<Game.Companies.Employee>(entity, isReadOnly: true).Length;
             }
 
+            if (EntityManager.HasBuffer<Game.Net.SubNet>(entity))
+            {
+                // The building's own network pieces; connection points (where a power
+                // line or pipe joins it) are nodes with no segment ending at them.
+                DynamicBuffer<Game.Net.SubNet> subNets = EntityManager.GetBuffer<Game.Net.SubNet>(entity, isReadOnly: true);
+                var subNetInfos = new List<object>();
+                for (int i = 0; i < subNets.Length && subNetInfos.Count < 40; i++)
+                {
+                    Entity subNet = subNets[i].m_SubNet;
+                    if (!EntityManager.Exists(subNet) || !EntityManager.HasComponent<PrefabRef>(subNet))
+                    {
+                        continue;
+                    }
+                    Entity subPrefab = EntityManager.GetComponentData<PrefabRef>(subNet).m_Prefab;
+                    PrefabBase sp = prefabSystem.GetPrefab<PrefabBase>(subPrefab);
+                    string voltage = EntityManager.HasComponent<ElectricityConnectionData>(subPrefab)
+                        ? EntityManager.GetComponentData<ElectricityConnectionData>(subPrefab).m_Voltage.ToString()
+                        : null;
+                    if (EntityManager.HasComponent<Game.Net.Node>(subNet))
+                    {
+                        float3 p = EntityManager.GetComponentData<Game.Net.Node>(subNet).m_Position;
+                        int ending = 0;
+                        if (EntityManager.HasBuffer<Game.Net.ConnectedEdge>(subNet))
+                        {
+                            foreach (Game.Net.ConnectedEdge ce in EntityManager.GetBuffer<Game.Net.ConnectedEdge>(subNet, isReadOnly: true))
+                            {
+                                Game.Net.Edge e = EntityManager.GetComponentData<Game.Net.Edge>(ce.m_Edge);
+                                if (e.m_Start == subNet || e.m_End == subNet)
+                                {
+                                    ending++;
+                                }
+                            }
+                        }
+                        subNetInfos.Add(new
+                        {
+                            kind = "node",
+                            entity = new { index = subNet.Index, version = subNet.Version },
+                            prefab = sp != null ? sp.name : null,
+                            position = new { x = p.x, y = p.y, z = p.z },
+                            segmentsEnding = ending,
+                            marker = EntityManager.HasComponent<Game.Net.Marker>(subNet),
+                            electricity = voltage,
+                        });
+                    }
+                    else if (EntityManager.HasComponent<Game.Net.Edge>(subNet) && EntityManager.HasComponent<Game.Net.Curve>(subNet))
+                    {
+                        Colossal.Mathematics.Bezier4x3 c = EntityManager.GetComponentData<Game.Net.Curve>(subNet).m_Bezier;
+                        subNetInfos.Add(new
+                        {
+                            kind = "segment",
+                            entity = new { index = subNet.Index, version = subNet.Version },
+                            prefab = sp != null ? sp.name : null,
+                            start = new { x = c.a.x, y = c.a.y, z = c.a.z },
+                            end = new { x = c.d.x, y = c.d.y, z = c.d.z },
+                            marker = EntityManager.HasComponent<Game.Net.Marker>(subNet),
+                            electricity = voltage,
+                        });
+                    }
+                }
+                result["subNetCount"] = subNets.Length;
+                result["subNets"] = subNetInfos;
+            }
+
             return BridgeResponse.Json(result);
         }
     }

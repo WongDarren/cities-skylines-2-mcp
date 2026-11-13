@@ -346,6 +346,15 @@ registerJsonTool(
   "/city/devtree",
 );
 
+registerJsonTool(
+  "cs2_milestones",
+  "Milestone progress",
+  "Milestone progress: the current milestone (index, name), the city's current XP, the next milestone with the " +
+    "XP it requires, XP still to go and progress, and every milestone with its cumulative XP threshold and rewards " +
+    "(money, loan limit, development points, map tile permits), read from the game's milestone prefabs.",
+  "/city/milestones",
+);
+
 server.registerTool(
   "cs2_buy_dev_node",
   {
@@ -1426,7 +1435,12 @@ server.registerTool(
       "otherwise splits the nearest compatible segment at that point (a track never joins a road). Ends with " +
       "nothing in range start freely on the terrain. Straight, or curved through cx/cz (needed where tracks must " +
       "leave a junction smoothly). Use for new road links and ramps, and for track spurs to station tracks (find " +
-      "those with cs2_road_graph allNets). Validated by the game; costs money like a player build.",
+      "those with cs2_road_graph allNets). Validated by the game; costs money like a player build. " +
+      "Power lines and pipes also snap to a building's connection point (transformer, power plant, solar/" +
+      "geothermal/nuclear station, incinerator, pumping station...), like the in-game power-line tool: give the " +
+      "building's position (anywhere on its lot) as that end when no other compatible network is within `snap`; the " +
+      "end then reports snappedTo 'building connection' and the building. Segments owned by a building can only be " +
+      "joined at their end nodes, never split.",
     inputSchema: {
       prefab: z.string().describe("Exact network prefab name (cs2_find_prefabs category road or net)"),
       x1: z.number().describe("Start X"),

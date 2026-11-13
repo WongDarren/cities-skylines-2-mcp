@@ -37,6 +37,8 @@ namespace CS2MCP
             public float Split;
             public float3 Position;
             public float Elevation;
+            /// <summary>The building whose network connection point (an orphan sub-net node) this end snapped to.</summary>
+            public Entity Building;
         }
 
         private enum Stage
@@ -188,12 +190,22 @@ namespace CS2MCP
                         }
                         else
                         {
-                            List<string> errors = CollectTempErrors();
+                            var where = new List<string>();
+                            List<string> errors = CollectTempErrors(where);
                             applyMode = ApplyMode.Clear;
+                            string detail = "";
+                            if (where.Count > 0)
+                            {
+                                detail += "; error on: " + string.Join("; ", where);
+                            }
+                            if (m_Mode == Mode.Build)
+                            {
+                                detail += "; start " + DescribeEndBrief(m_BuildStart) + ", end " + DescribeEndBrief(m_BuildEnd);
+                            }
                             CompletePending(BridgeResponse.Error(409,
                                 OperationName + " blocked by game validation (" +
                                 (errors.Count > 0 ? string.Join(", ", errors) : "overlap, unsupported road type, protected segment...") +
-                                "); nothing was changed"));
+                                ")" + detail + "; nothing was changed"));
                         }
                         m_Stage = Stage.Finish;
                         break;
@@ -339,6 +351,13 @@ namespace CS2MCP
 
         private CoursePos ToCoursePos(BuildEnd end, float courseDelta)
         {
+            // GetCoursePos: a node owned by a building takes the parent mesh of its local transform.
+            int parentMesh = -1;
+            if (end.Entity != Entity.Null && EntityManager.HasComponent<Game.Common.Owner>(end.Entity)
+                && EntityManager.HasComponent<LocalTransformCache>(end.Entity))
+            {
+                parentMesh = EntityManager.GetComponentData<LocalTransformCache>(end.Entity).m_ParentMesh;
+            }
             return new CoursePos
             {
                 m_Entity = end.Entity,
@@ -347,8 +366,32 @@ namespace CS2MCP
                 m_Elevation = end.Elevation,
                 m_Rotation = NetUtils.GetNodeRotation(MathUtils.Tangent(m_BuildCurve, courseDelta)),
                 m_CourseDelta = courseDelta,
-                m_ParentMesh = -1,
+                m_ParentMesh = parentMesh,
             };
+        }
+
+        private string DescribeEndBrief(BuildEnd end)
+        {
+            string kind = end.Entity == Entity.Null ? "free point"
+                : EntityManager.HasComponent<Edge>(end.Entity) ? $"segment {end.Entity.Index}:{end.Entity.Version} split at {end.Split:F2}"
+                : end.Building != Entity.Null ? $"connection node {end.Entity.Index}:{end.Entity.Version} of building {end.Building.Index}:{end.Building.Version} ({PrefabName(end.Building)})"
+                : $"junction {end.Entity.Index}:{end.Entity.Version}";
+            if (end.Entity != Entity.Null && !EntityManager.HasComponent<Edge>(end.Entity))
+            {
+                kind += $" [{PrefabName(end.Entity)}]";
+            }
+            return $"{kind} at ({end.Position.x:F1},{end.Position.y:F1},{end.Position.z:F1}) elevation {end.Elevation:F1}";
+        }
+
+        private string PrefabName(Entity entity)
+        {
+            if (!EntityManager.Exists(entity) || !EntityManager.HasComponent<PrefabRef>(entity))
+            {
+                return "?";
+            }
+            PrefabBase prefab = World.GetOrCreateSystemManaged<PrefabSystem>()
+                .GetPrefab<PrefabBase>(EntityManager.GetComponentData<PrefabRef>(entity).m_Prefab);
+            return prefab != null ? prefab.name : "?";
         }
 
         private BridgeResponse BuildConnectResponse()
@@ -422,10 +465,23 @@ namespace CS2MCP
                 ? EntityManager.GetBuffer<ConnectedEdge>(node, isReadOnly: true).Length
                 : 0;
             string snappedTo = end.Entity == Entity.Null ? "free point"
-                : EntityManager.HasComponent<Edge>(end.Entity) ? "segment (split)" : "junction";
+                : EntityManager.HasComponent<Edge>(end.Entity) ? "segment (split)"
+                : end.Building != Entity.Null ? "building connection" : "junction";
+            object building = null;
+            if (end.Building != Entity.Null && EntityManager.Exists(end.Building) && EntityManager.HasComponent<PrefabRef>(end.Building))
+            {
+                PrefabBase buildingPrefab = World.GetOrCreateSystemManaged<PrefabSystem>()
+                    .GetPrefab<PrefabBase>(EntityManager.GetComponentData<PrefabRef>(end.Building).m_Prefab);
+                building = new
+                {
+                    entity = new { index = end.Building.Index, version = end.Building.Version },
+                    prefab = buildingPrefab != null ? buildingPrefab.name : null,
+                };
+            }
             return new
             {
                 snappedTo,
+                building,
                 position = new { x = end.Position.x, y = end.Position.y, z = end.Position.z },
                 junction = node != Entity.Null ? new { index = node.Index, version = node.Version } : null,
                 segmentsAtJunction = connected,
@@ -487,7 +543,7 @@ namespace CS2MCP
         /// Names of the validation errors the game raised on temp entities
         /// (it shows them as error icons whose prefab carries ToolErrorData).
         /// </summary>
-        private List<string> CollectTempErrors()
+        private List<string> CollectTempErrors(List<string> where = null)
         {
             var names = new List<string>();
             using (NativeArray<Entity> icons = m_IconQuery.ToEntityArray(Allocator.Temp))
@@ -508,6 +564,14 @@ namespace CS2MCP
                     if (!names.Contains(name))
                     {
                         names.Add(name);
+                    }
+                    if (where != null && where.Count < 6)
+                    {
+                        // Which temp piece raised it (the new segment, a pylon, a node...) and where.
+                        float3 location = EntityManager.GetComponentData<Game.Notifications.Icon>(icons[i]).m_Location;
+                        string kind = EntityManager.HasComponent<Edge>(owner) ? "segment"
+                            : EntityManager.HasComponent<Node>(owner) ? "node" : "object";
+                        where.Add($"{name} on {kind} {PrefabName(owner)} at ({location.x:F0},{location.z:F0})");
                     }
                 }
             }
