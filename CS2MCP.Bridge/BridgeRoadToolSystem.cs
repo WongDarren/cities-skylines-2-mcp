@@ -37,6 +37,8 @@ namespace CS2MCP
             public float Split;
             public float3 Position;
             public float Elevation;
+            /// <summary>The building whose network connection point (an orphan sub-net node) this end snapped to.</summary>
+            public Entity Building;
         }
 
         private enum Stage
@@ -422,10 +424,23 @@ namespace CS2MCP
                 ? EntityManager.GetBuffer<ConnectedEdge>(node, isReadOnly: true).Length
                 : 0;
             string snappedTo = end.Entity == Entity.Null ? "free point"
-                : EntityManager.HasComponent<Edge>(end.Entity) ? "segment (split)" : "junction";
+                : EntityManager.HasComponent<Edge>(end.Entity) ? "segment (split)"
+                : end.Building != Entity.Null ? "building connection" : "junction";
+            object building = null;
+            if (end.Building != Entity.Null && EntityManager.Exists(end.Building) && EntityManager.HasComponent<PrefabRef>(end.Building))
+            {
+                PrefabBase buildingPrefab = World.GetOrCreateSystemManaged<PrefabSystem>()
+                    .GetPrefab<PrefabBase>(EntityManager.GetComponentData<PrefabRef>(end.Building).m_Prefab);
+                building = new
+                {
+                    entity = new { index = end.Building.Index, version = end.Building.Version },
+                    prefab = buildingPrefab != null ? buildingPrefab.name : null,
+                };
+            }
             return new
             {
                 snappedTo,
+                building,
                 position = new { x = end.Position.x, y = end.Position.y, z = end.Position.z },
                 junction = node != Entity.Null ? new { index = node.Index, version = node.Version } : null,
                 segmentsAtJunction = connected,
