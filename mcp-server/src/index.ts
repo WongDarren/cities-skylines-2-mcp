@@ -1483,6 +1483,318 @@ server.registerTool(
   },
 );
 
+// ---------------------------------------------------------------------------
+// Power-line routing: plan a pylon path around buildings, then build it piece by piece.
+// ---------------------------------------------------------------------------
+
+type Pt = { x: number; z: number };
+type Rect = { cx: number; cz: number; fx: number; fz: number; hd: number; hw: number };
+type Line = { a: Pt; b: Pt; half: number };
+
+/** Approximate half-width of a network for keeping pylons off it. */
+function netHalfWidth(prefab: string): number {
+  const p = prefab.toLowerCase();
+  if (p.includes("large")) return 16;
+  if (p.includes("medium")) return 12;
+  if (p.includes("small") || p.includes("gravel") || p.includes("alley")) return 8;
+  if (p.includes("highway")) return p.includes("1 lane") ? 8 : p.includes("2 lane") ? 11 : 15;
+  if (p.includes("track")) return 7;
+  return 6;
+}
+
+/** Networks a pylon cannot stand on (underground utilities and paths inside buildings are fine). */
+function isSurfaceNet(prefab: string, partOfBuilding: boolean): boolean {
+  if (partOfBuilding) return false;
+  const p = prefab.toLowerCase();
+  return !(p.includes("pipe") || p.includes("ground cable") || p.includes("invisible") || p.includes("subway") || p.includes("marker"));
+}
+
+function inRect(r: Rect, x: number, z: number, margin: number): boolean {
+  const dx = x - r.cx;
+  const dz = z - r.cz;
+  const along = dx * r.fx + dz * r.fz; // along the facing (depth)
+  const across = dx * r.fz - dz * r.fx; // across (width)
+  return Math.abs(along) <= r.hd + margin && Math.abs(across) <= r.hw + margin;
+}
+
+function distToLine(l: Line, x: number, z: number): number {
+  const vx = l.b.x - l.a.x;
+  const vz = l.b.z - l.a.z;
+  const len2 = vx * vx + vz * vz || 1;
+  const t = Math.max(0, Math.min(1, ((x - l.a.x) * vx + (z - l.a.z) * vz) / len2));
+  return Math.hypot(x - (l.a.x + t * vx), z - (l.a.z + t * vz));
+}
+
+interface BuildingRow {
+  entity?: { index: number };
+  position?: { x: number; z: number };
+  lotMeters?: { width: number; depth: number };
+  facingDegrees?: number;
+}
+
+async function collectBuildings(from: Pt, to: Pt): Promise<Map<number, Rect>> {
+  const out = new Map<number, Rect>();
+  const length = Math.hypot(to.x - from.x, to.z - from.z);
+  const steps = Math.max(1, Math.ceil(length / 400));
+  for (let i = 0; i <= steps; i++) {
+    const x = from.x + ((to.x - from.x) * i) / steps;
+    const z = from.z + ((to.z - from.z) * i) / steps;
+    const params = new URLSearchParams({ x: String(x), z: String(z), radius: "520", limit: "300" });
+    const payload = (await bridgeJson(`/city/buildings/near?${bridgeQueryString(params)}`)) as { buildings?: BuildingRow[] };
+    for (const b of payload.buildings ?? []) {
+      if (!b.entity || !b.position || !b.lotMeters) continue;
+      const rad = ((b.facingDegrees ?? 0) * Math.PI) / 180;
+      out.set(b.entity.index, {
+        cx: b.position.x,
+        cz: b.position.z,
+        fx: Math.sin(rad),
+        fz: Math.cos(rad),
+        hd: b.lotMeters.depth / 2,
+        hw: b.lotMeters.width / 2,
+      });
+    }
+  }
+  return out;
+}
+
+interface RoadRow {
+  prefab?: string;
+  start?: { x: number; z: number };
+  end?: { x: number; z: number };
+  partOfBuilding?: boolean;
+}
+
+async function collectNets(from: Pt, to: Pt): Promise<Line[]> {
+  const mid = { x: (from.x + to.x) / 2, z: (from.z + to.z) / 2 };
+  const radius = Math.min(2000, Math.hypot(to.x - from.x, to.z - from.z) / 2 + 400);
+  const params = new URLSearchParams({ x: String(mid.x), z: String(mid.z), radius: String(radius), limit: "3000", nets: "all" });
+  const payload = (await bridgeJson(`/city/road-graph?${bridgeQueryString(params)}`, 20_000)) as { roads?: RoadRow[] };
+  const lines: Line[] = [];
+  for (const r of payload.roads ?? []) {
+    if (!r.prefab || !r.start || !r.end || !isSurfaceNet(r.prefab, !!r.partOfBuilding)) continue;
+    lines.push({ a: r.start, b: r.end, half: netHalfWidth(r.prefab) });
+  }
+  return lines;
+}
+
+/**
+ * Plan pylon points from `from` to `to`: A* over a grid where building lots block the wire, then a
+ * greedy pass that turns the path into straight pieces no longer than maxPiece whose joints sit off
+ * roads and tracks (a wire may cross them, a pylon may not stand on them).
+ */
+function planPowerRoute(
+  from: Pt,
+  to: Pt,
+  rects: Rect[],
+  lines: Line[],
+  opts: { cell: number; margin: number; maxPiece: number; pad: number },
+): { points: Pt[]; warnings: string[] } {
+  const { cell, margin, maxPiece, pad } = opts;
+  const warnings: string[] = [];
+  const minX = Math.min(from.x, to.x) - pad;
+  const minZ = Math.min(from.z, to.z) - pad;
+  const nx = Math.ceil((Math.max(from.x, to.x) + pad - minX) / cell) + 1;
+  const nz = Math.ceil((Math.max(from.z, to.z) + pad - minZ) / cell) + 1;
+  const wx = (i: number) => minX + i * cell;
+  const wz = (j: number) => minZ + j * cell;
+  // The endpoint buildings themselves are where the line must arrive: ignore their lots.
+  const obstacles = rects.filter((r) => !inRect(r, from.x, from.z, 2) && !inRect(r, to.x, to.z, 2));
+  const wireBlocked = (x: number, z: number) => obstacles.some((r) => inRect(r, x, z, margin));
+  const pylonBlocked = (x: number, z: number) => wireBlocked(x, z) || lines.some((l) => distToLine(l, x, z) <= l.half + 2);
+
+  const blocked = new Uint8Array(nx * nz);
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) blocked[j * nx + i] = wireBlocked(wx(i), wz(j)) ? 1 : 0;
+  const cellOf = (p: Pt) => [Math.round((p.x - minX) / cell), Math.round((p.z - minZ) / cell)];
+  const [si, sj] = cellOf(from);
+  const [ti, tj] = cellOf(to);
+  blocked[sj * nx + si] = 0;
+  blocked[tj * nx + ti] = 0;
+
+  // A* (8-neighbour) with a simple binary heap.
+  const g = new Float64Array(nx * nz).fill(Infinity);
+  const prev = new Int32Array(nx * nz).fill(-1);
+  const heap: [number, number][] = [];
+  const push = (f: number, n: number) => {
+    heap.push([f, n]);
+    let k = heap.length - 1;
+    while (k > 0) {
+      const p = (k - 1) >> 1;
+      if (heap[p][0] <= heap[k][0]) break;
+      [heap[p], heap[k]] = [heap[k], heap[p]];
+      k = p;
+    }
+  };
+  const pop = () => {
+    const top = heap[0];
+    const last = heap.pop()!;
+    if (heap.length) {
+      heap[0] = last;
+      let k = 0;
+      for (;;) {
+        const l = 2 * k + 1;
+        const r = l + 1;
+        let m = k;
+        if (l < heap.length && heap[l][0] < heap[m][0]) m = l;
+        if (r < heap.length && heap[r][0] < heap[m][0]) m = r;
+        if (m === k) break;
+        [heap[m], heap[k]] = [heap[k], heap[m]];
+        k = m;
+      }
+    }
+    return top;
+  };
+  const start = sj * nx + si;
+  const goal = tj * nx + ti;
+  g[start] = 0;
+  push(Math.hypot(ti - si, tj - sj), start);
+  while (heap.length) {
+    const [, n] = pop();
+    if (n === goal) break;
+    const i = n % nx;
+    const j = (n - i) / nx;
+    for (let dj = -1; dj <= 1; dj++)
+      for (let di = -1; di <= 1; di++) {
+        if (!di && !dj) continue;
+        const a = i + di;
+        const b = j + dj;
+        if (a < 0 || b < 0 || a >= nx || b >= nz) continue;
+        const m = b * nx + a;
+        if (blocked[m]) continue;
+        const cost = g[n] + (di && dj ? Math.SQRT2 : 1);
+        if (cost < g[m]) {
+          g[m] = cost;
+          prev[m] = n;
+          push(cost + Math.hypot(ti - a, tj - b), m);
+        }
+      }
+  }
+  if (!Number.isFinite(g[goal])) {
+    return { points: [], warnings: ["no route: buildings enclose one of the ends (try a larger pad or a different end point)"] };
+  }
+  const path: Pt[] = [];
+  for (let n = goal; n !== -1; n = prev[n]) {
+    const i = n % nx;
+    path.push({ x: wx(i), z: wz((n - i) / nx) });
+  }
+  path.reverse();
+  path[0] = from;
+  path[path.length - 1] = to;
+
+  const lineClear = (a: Pt, b: Pt) => {
+    const len = Math.hypot(b.x - a.x, b.z - a.z);
+    const n = Math.max(1, Math.ceil(len / 4));
+    for (let k = 1; k < n; k++) {
+      const x = a.x + ((b.x - a.x) * k) / n;
+      const z = a.z + ((b.z - a.z) * k) / n;
+      if (wireBlocked(x, z)) return false;
+    }
+    return true;
+  };
+
+  const points: Pt[] = [from];
+  let i = 0;
+  while (i < path.length - 1) {
+    let pick = -1;
+    let fallback = -1;
+    for (let j = path.length - 1; j > i; j--) {
+      const d = Math.hypot(path[j].x - path[i].x, path[j].z - path[i].z);
+      if (d > maxPiece || !lineClear(path[i], path[j])) continue;
+      if (fallback < 0) fallback = j;
+      if (j === path.length - 1 || !pylonBlocked(path[j].x, path[j].z)) {
+        pick = j;
+        break;
+      }
+    }
+    if (pick < 0) {
+      pick = fallback >= 0 ? fallback : i + 1;
+      warnings.push(`joint at (${Math.round(path[pick].x)},${Math.round(path[pick].z)}) may sit on a road or track`);
+    }
+    points.push(path[pick]);
+    i = pick;
+  }
+  return { points, warnings };
+}
+
+server.registerTool(
+  "cs2_route_power_line",
+  {
+    title: "Route and build a power line around buildings",
+    description:
+      "Connect two points (usually two buildings: a power plant, battery or incinerator and a transformer, or a " +
+      "transformer and the end of an existing high-voltage line) with a power line that avoids buildings. Plans a " +
+      "path on a grid where building lots block the wire, splits it into straight pieces of at most maxPiece meters " +
+      "whose pylons stand off roads and tracks (wires may cross them), then builds the pieces in order with the same " +
+      "snapping as cs2_connect_road: the first and last ends snap to the building's connection point (give a point on " +
+      "the building's lot) or to a line node within endSnap. dryRun=true only returns the planned pylon points. " +
+      "Stops at the first piece the game rejects and reports how far it got.",
+    inputSchema: {
+      x1: z.number().describe("Start X (on the first building's lot, or at a power-line node)"),
+      z1: z.number().describe("Start Z"),
+      x2: z.number().describe("End X (on the second building's lot, or at a power-line node)"),
+      z2: z.number().describe("End Z"),
+      prefab: z.string().optional().describe("Power line prefab (default 'High-voltage Line')"),
+      maxPiece: z.number().min(30).max(120).optional().describe("Longest straight piece in meters (default 90)"),
+      margin: z.number().min(0).max(30).optional().describe("Clearance kept from building lots in meters (default 2)"),
+      pad: z.number().min(50).max(800).optional().describe("How far the route may wander outside the box spanned by the ends (default 250)"),
+      endSnap: z.number().min(3).max(50).optional().describe("Snap distance at the two ends (default 25)"),
+      dryRun: z.boolean().optional().describe("Only plan; build nothing"),
+    },
+  },
+  async ({ x1, z1, x2, z2, prefab, maxPiece, margin, pad, endSnap, dryRun }) => {
+    const from = { x: x1, z: z1 };
+    const to = { x: x2, z: z2 };
+    const net = prefab ?? "High-voltage Line";
+    try {
+      const [rects, lines] = await Promise.all([collectBuildings(from, to), collectNets(from, to)]);
+      const { points, warnings } = planPowerRoute(from, to, [...rects.values()], lines, {
+        cell: 6,
+        margin: margin ?? 2,
+        maxPiece: maxPiece ?? 90,
+        pad: pad ?? 250,
+      });
+      const plan = points.map((p) => ({ x: Math.round(p.x * 10) / 10, z: Math.round(p.z * 10) / 10 }));
+      if (!points.length || dryRun) {
+        return jsonResult({ planned: plan, pieces: Math.max(0, plan.length - 1), warnings, buildingsConsidered: rects.size, netsConsidered: lines.length });
+      }
+      const built: unknown[] = [];
+      for (let k = 0; k < points.length - 1; k++) {
+        const a = points[k];
+        const b = points[k + 1];
+        const first = k === 0;
+        const last = k === points.length - 2;
+        const params = new URLSearchParams({
+          prefab: net,
+          x1: String(a.x),
+          z1: String(a.z),
+          x2: String(b.x),
+          z2: String(b.z),
+          snap: String(first || last ? endSnap ?? 25 : 3),
+        });
+        try {
+          const res = (await bridgeJson(`/build/road/connect?${bridgeQueryString(params)}`, 15_000)) as {
+            segments?: unknown[];
+            start?: { snappedTo?: string };
+            end?: { snappedTo?: string };
+          };
+          built.push({ piece: k + 1, from: plan[k], to: plan[k + 1], segments: res.segments?.length ?? 0, start: res.start?.snappedTo, end: res.end?.snappedTo });
+        } catch (err) {
+          return jsonResult({
+            builtPieces: k,
+            ofPieces: points.length - 1,
+            failedPiece: { piece: k + 1, from: plan[k], to: plan[k + 1], error: (err as Error).message },
+            planned: plan,
+            built,
+            warnings,
+          });
+        }
+      }
+      return jsonResult({ builtPieces: points.length - 1, built, warnings });
+    } catch (err) {
+      return errorResult(err);
+    }
+  },
+);
+
 server.registerTool(
   "cs2_prefab_info",
   {
