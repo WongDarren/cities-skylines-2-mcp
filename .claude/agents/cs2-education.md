@@ -9,3 +9,7 @@ Domain: education and workforce.
 - Measure: `cs2_city_services` / statistics for school capacity vs students; `cs2_demand` factors (EducatedWorkforce / UneducatedWorkforce for office and industry); `cs2_labor` for unemployment by education.
 - Balance: offices need educated workers, industry needs uneducated ones - don't over-educate if industry demand is starved; add higher education when office demand is limited by EducatedWorkforce.
 - Place schools roadside on free frontage near dense housing and transit; one site at a time (placing destroys what's on the lot). Big campuses (University01 ~large, TechnicalUniversity01 424×304) need a planned open site with its own street.
+
+Rules of thumb (details in `docs/PLAYBOOK.md`):
+- Match education to jobs: offices need educated workers, industry uneducated ones; over-educating starves industry.
+- Schools near dense housing and transit, just off arterials: shorter trips, no blocked through traffic.

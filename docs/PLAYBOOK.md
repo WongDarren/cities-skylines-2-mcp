@@ -4,18 +4,26 @@ City-agnostic rules learned building a ~195k-population city through this repo's
 Each rule carries its reason. Coordinates and entity ids of a specific city belong in that city's
 memory notes, not here. For a fresh map, follow [NEW-CITY-CHECKLIST.md](NEW-CITY-CHECKLIST.md).
 Research background and sources: [STRATEGY.md](../.claude/skills/cs2-city-review/STRATEGY.md).
+Beginner-stage practices also draw on City Planner Plays, "The New Ultimate Beginners Guide to Cities Skylines 2" (post-Economy 2.0).
 
 Trust in-game numbers (`cs2_demand`, `cs2_budget`, `cs2_traffic`) over any guide: the economy was
 reworked in patch 1.1.5f1 (Economy 2.0, June 2024) and many web guides predate it.
 
 ## 1. New-city bootstrap (first ~50k people)
 
-1. **Site analysis before any road.** `cs2_terrain` (water, slopes), `cs2_gridmap groundWater`,
-   `cs2_list_map_tiles` (features). Find the outside highway, high-voltage line and water edges.
-   There is no wind tool: once industry runs, read the drift from `cs2_gridmap airPollution`.
-2. **Pick zones by site.** Homes upwind and away from the shore outlet; industry downwind on land
-   without groundwater, with a direct truck route to the highway. Reserve a utility strip
-   (turbines, landfill, pumps) away from homes.
+0. **Choose the map carefully:** climate, hemisphere and natural resources are fixed for good.
+   Prefer maps with fertile land, ore and oil.
+1. **Site analysis before any road.** `cs2_terrain` (water, slopes; in-game contour lines are 10 m
+   apart, close together = steep), `cs2_gridmap groundWater`, `cs2_list_map_tiles` (features).
+   Find the outside highway, high-voltage line and water edges. There is no wind tool: once
+   industry runs, read the drift from `cs2_gridmap airPollution`.
+2. **Pick zones by site.** Homes upwind and away from the shore outlet; industry downwind, away
+   from the aquifers you will pump (aquifers often touch, so pollution spreads), with a direct truck
+   route to the highway. **Don't build over fertile, ore or oil land:** local extraction makes goods
+   cheaper, speeds level-ups and raises profits. Reserve a utility strip (turbines, landfill, pumps)
+   away from homes.
+   Map-provided roads have no upkeep until upgraded; new roads add upkeep, so pause the game while
+   laying out.
 3. **Infrastructure before zoning:** highway link, power, a groundwater pump upstream, a sewage
    outlet downstream of every well.
 4. **Road skeleton first, grid second.** Lay the main avenue/collector loop from the highway
@@ -34,8 +42,12 @@ reworked in patch 1.1.5f1 (Economy 2.0, June 2024) and many web guides predate i
 - Zone cells are 8 m; lots are at most 6 cells (48 m) deep. Small Road 16 m, Medium Road 24 m.
 - Parallel Small streets **112 m** apart (48+48+16); Small next to Medium **116 m**; Medium next to
   Medium **120 m**. Align new rows with the neighbouring district's coordinates.
+- The 112 m pitch is roughly "Barcelona" block size: it balances walkability, traffic and room
+  for large buildings. Follow the terrain; small imperfections are fine.
 - Blocks 200–280 m long; T-junctions ≥ 60 m apart, no junctions within 30 m of each other; every
   street joins at both ends (no dead ends, no stubs).
+- Plan the hierarchy deliberately: local streets → collectors (one-way couplets for local flow
+  where useful) → a central Medium arterial carrying regional traffic toward future interchanges.
 - Hierarchy: Small → Medium collector → arterial → highway. Only collectors and arterials meet
   arterials. Keep collectors Medium; an over-wide side road (Large) gets equal priority with the
   arterial it meets and queues the main flow.
@@ -128,6 +140,10 @@ reworked in patch 1.1.5f1 (Economy 2.0, June 2024) and many web guides predate i
 - **Big plants (solar, geothermal, incinerator, batteries) need a high-voltage hookup.** Put a
   TransformerStation **right beside** each plant, one short HV hop; roads carry low voltage onward.
   Long HV lines through town are impossible: pylons can't stand on roads or built lots.
+  `cs2_route_power_line` routes a line around buildings; use it for hops over open land.
+- Early game, wind beats small coal: no workers and lower upkeep. Turbine upgrades (solar assist,
+  battery extension, advanced rotor) add output on the same land when space gets tight.
+- Where the map's high-voltage line reaches the edge, a transformer there imports power.
 - Solar needs a long clear frontage (288×552 lot). **Geothermal needs a geothermal hotspot**
   (map resource), not just groundwater; it fails everywhere else.
 - Zero-emission goal: no gas/coal.
@@ -136,7 +152,10 @@ reworked in patch 1.1.5f1 (Economy 2.0, June 2024) and many web guides predate i
 
 - **Roads carry power and small pipes. Before removing a road, check what it carries.** Removing
   highway crossings once cut a wind farm off (820 buildings dark). Lay Low-voltage Ground Cable and
-  Combined Large Pipe across gaps first.
+  Combined Large Pipe across gaps first. **Highways carry no water or sewage** by default, so
+  districts reached only by highway need pipes laid separately.
+- A river/ocean water pumping station gives ~3× a water tower's output for much less upkeep;
+  intake upstream, sewage outlet downstream.
 - Past ~10k people, add trunk pipes (Large Water / Large Sewage / Combined Large) from pumps and
   outlets into each district; road pipes are small.
 - Pumps on clean groundwater, upstream; outlets downstream; never pump near landfills (they poison
@@ -145,7 +164,10 @@ reworked in patch 1.1.5f1 (Economy 2.0, June 2024) and many web guides predate i
   warnings: remove them.
 - Garbage: spread landfill/recycling/incinerator capacity across the city; all-in-one-corner left
   the far side short. Replace landfills with recycling and incineration as the city grows.
-- Rebuild a "Facility Full" landfill or cemetery in place (demolish + place) to reset it.
+- **Never let a landfill fill up:** collection stops and pumps (and coal plants) lose output.
+  Rebuild a "Facility Full" landfill or cemetery in place (demolish + place) to reset it.
+- Crematoriums beat cemeteries on space and upkeep. Start with the small clinic and small police
+  station. Place services just off arterials, not on them.
 
 ## 8. Pollution and zoning
 
@@ -156,8 +178,17 @@ reworked in patch 1.1.5f1 (Economy 2.0, June 2024) and many web guides predate i
   or densifying, but do it block by block with a rollback save and keep housing demand covered.
 - **Zone circles must stay inside one block** (radius ≤ half block depth from the street). A circle
   reaching across an avenue rezones and condemns the far side.
+- Zoning over existing zoning rezones it, which is easy to do by accident.
 - One zone type per block face; commercial/mixed on collectors and arterials, residential inside,
   office/industry as buffers. Densify near subway/tram stops in 2-row stages.
+- Commercial wants passing car and foot traffic (main streets); offices like being near, not on,
+  major roads; low-rent housing goes close to amenities. Each residential density has its own
+  demand bar.
+- Lot size sets building size: size lots on purpose (e.g. 6×6 for big factories, 2×2 for small
+  warehouses).
+- Control which street buildings front: leave block ends unzoned at first and fill them once the
+  rest has grown. A footpath along a block edge straightens the zoning grid.
+- Parks drive building level-ups (more tax): add them early, not as an afterthought.
 - New medium-density lots can take 8+ in-game hours to start building.
 - Noise: keep homes off highways, industry and turbine fields; pedestrian/small streets and parks.
 
@@ -165,8 +196,12 @@ reworked in patch 1.1.5f1 (Economy 2.0, June 2024) and many web guides predate i
 
 - **Import City Services (Paid Outside Services) is a trap:** at 13k people it cost ~$2.2M/month
   and flipped the budget to a deficit. Keep it OFF; build your own services.
-- Move taxes 1–2 points at a time and watch the `Taxes` factor in `cs2_demand`.
-- Loans are fine for a planned big build when income covers repayment.
+- Move taxes 1–2 points at a time and watch the `Taxes` factor in `cs2_demand`. Residential,
+  commercial and industrial tolerate 10–12%; office demand drops above ~8–9%.
+- Avoid loans early. Later they're fine for a planned big build when income covers repayment.
+- Moving buildings costs real money; place them right the first time.
+- Use the production-chain view: filling a local shortfall (e.g. a farm for a missing good) cuts
+  costs and earns exports.
 - Upgrading or raising a service budget is often cheaper than a new building (garbage 140% fixed
   coverage gaps).
 - **Milestones are XP-based** (`cs2_milestones`). Passive XP from population + happiness dominates
@@ -174,7 +209,10 @@ reworked in patch 1.1.5f1 (Economy 2.0, June 2024) and many web guides predate i
 - Dev-point order that worked: road services → highways/large roads → roundabouts → hospital,
   crematorium → recycling, incinerator → telecom, post sorting → advanced electricity, solar →
   water treatment → college/university → transit (train, tram, subway) → intersections.
-- Buy tiles ahead of need (`cs2_list_map_tiles`, `cs2_tiles_info` for cost); keep some permits.
+- Buy tiles when a planned district or corridor needs them, not before: tile upkeep is heavy
+  (`cs2_list_map_tiles`, `cs2_tiles_info` for cost). Keep some permits.
+- Spend dev points on what you will place soon. Signature buildings are free: place them as soon
+  as they unlock.
 - Happiness levers: clinics/hospital, clean air, education, police, working utilities, traffic,
   parks. Read Chirper (screenshot while the panel is open) for exact complaints.
 

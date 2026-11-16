@@ -12,3 +12,10 @@ Domain: city finances.
 - Never enable "Paid Outside Services"/Import City Services (it cost ~$2.2M/month once).
 - Loans: repay when cash is plentiful; take one only for a planned big project.
 - Report income, expenses, balance before/after and every change made.
+
+Rules of thumb (details in `docs/PLAYBOOK.md`):
+- Taxes R/C/I about 10-12%, office 8-9% at most: office demand falls fast above that.
+- No loans early: repayments starve a small budget.
+- Buy tiles only when a planned district needs them: tile upkeep is heavy.
+- NEVER enable Import City Services: it bankrupts a city (once -$1.6M/month).
+- Moving buildings costs real money: place them right the first time.

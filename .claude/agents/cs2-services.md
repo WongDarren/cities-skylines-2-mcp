@@ -10,3 +10,9 @@ Domain: care and safety services.
 - Place with `cs2_prefab_info` + `cs2_place_roadside` on FREE frontage only (check `cs2_buildings_near`; placing destroys what's there). One site at a time; stop at the first success.
 - Large buildings (hospital 184×80, research institute 168×72) need long free frontage - ask the coordinator/planner for a site rather than destroying homes.
 - One well-placed building beats several; check capacity before adding duplicates. Use `cs2_service_budgets` sparingly (economy agent owns budgets).
+
+Rules of thumb (details in `docs/PLAYBOOK.md`):
+- Crematorium over cemetery: less space and upkeep.
+- Start with the small clinic and small police station: cheaper and enough early on.
+- Place services just off arterials, not on them: their vehicles and stops would block through traffic.
+- Parks early: they drive building level-ups and tax.

@@ -11,3 +11,12 @@ Domain: land use and demand.
 - Densify low-density areas next to subway/tram stops in 2-row stages (old homes are condemned and regrow).
 - Industry downwind (read the drift from the `cs2_gridmap airPollution` plume) with a buffer street/office strip from homes; commercial/mixed on collectors/arterials; offices near transit.
 - Leave taxes to the economy agent.
+
+Rules of thumb (details in `docs/PLAYBOOK.md`):
+- Lots are at most 6 cells (48 m) deep and lot size sets building size: size lots for the buildings you want (6x6 factories, 2x2 warehouses).
+- Leave block ends unzoned until the rest grows: that controls which street buildings face.
+- A footpath along a block edge resets the zoning grid: use it to straighten odd blocks.
+- Zoning over zoning rezones it, and rezoning occupied cells condemns them: stage it block by block with a rollback save.
+- Zone circles stay inside one block: a circle across an avenue condemns the far side.
+- Commercial on busy streets, offices near (not on) arterials, low-rent homes near amenities: each grows best there.
+- Each residential density has its own demand bar: zone the one that is asking.

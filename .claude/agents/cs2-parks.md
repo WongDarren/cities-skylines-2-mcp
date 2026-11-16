@@ -10,3 +10,7 @@ Domain: wellbeing and green space.
 - Parks (CityPark10 etc.), sports fields (large sports parks node unlocked), bike/pedestrian paths (PedestrianPathWithBikeLanes) linking homes to stations; noise buffers along highways/arterials.
 - Free frontage or open land only; never destroy homes for parks. Spread parks so each dense neighbourhood has one within ~400 m.
 - Park maintenance: check upkeep/maintenance coverage (park maintenance depot if unlocked).
+
+Rules of thumb (details in `docs/PLAYBOOK.md`):
+- Parks early and spread (one within ~400 m of dense housing): they drive level-ups, happiness and passive XP.
+- Buffer homes from highways, industry and turbine fields with parks or offices: noise and smoke cut happiness.

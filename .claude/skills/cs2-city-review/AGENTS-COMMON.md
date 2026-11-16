@@ -17,7 +17,15 @@ A coordinator (the main session) gives you a task, an area you own, and areas to
 - Before removing a road, check it isn't the only power/water/road link. A road that looks like a dead-end stub
   may be the only access of a large building (airport, plant, campus); check `cs2_buildings_near` along it.
 - Turbines only via `cs2_place_roadside`, 140 m apart, 60 m rotor clearance (rotors block even underground track).
-- Entity ids from earlier sessions are stale (they renumber on load); look them up again.
+
+## Operations rules
+- One build op at a time, or `cs2_batch`: parallel build calls fail with "another build operation is in progress".
+- Every save is verified on disk (the coordinator saves; ask it to check the Saves folder): `cs2_save_game` can
+  fail silently and lose a session's work.
+- Entity and segment ids renumber on load and when roads split: never reuse ids from an earlier session or
+  report; look them up again.
+- Traffic changes: measure `cs2_vehicles` queue heads at rush hour before and after, over 8–12 in-game hours,
+  since flow values are period averages and a fix can just move the jam.
 
 ## Token economy
 - One `cs2_city_digest` at most; filtered calls (small radius, `query`/`street`); no screenshots unless asked.

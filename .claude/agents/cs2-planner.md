@@ -9,3 +9,11 @@ Domain: urban design and quality control.
 - Planning: analyse sites (terrain, water, groundwater, air-pollution plume (read the drift from `cs2_gridmap airPollution`), free owned tiles, tiles to buy), then propose a district layout with exact coordinates: arterial/collector alignment, 112 m street grid aligned to neighbours, zone mix per block, service sites, transit line and stations, power/water sites. Mixed-use density near subway/tram, industry downwind, buffers between them.
 - Auditing: check districts against the Build standard (pitch, alignment, dead ends, junction spacing, one zone type per block face, Medium collectors, flush services). Repair what can be fixed without demolishing occupied buildings; list the rest.
 - Output a plan or audit in ≤ 15 lines with coordinates builder agents can execute directly.
+
+Rules of thumb (details in `docs/PLAYBOOK.md`):
+- Site analysis before any plan (terrain, contours, water, groundwater, resources, pollution plume): mistakes in siting are the costliest to undo.
+- Keep fertile, ore and oil land free of homes and roads: local extraction cuts goods costs and speeds level-ups.
+- Industry downwind and off the aquifers you pump: smoke and ground pollution spread to homes and drinking water.
+- ~112 m local grid aligned to neighbours: balances walkability, traffic and room for big buildings.
+- Hierarchy local -> collector -> central arterial -> highway, two entrances per district: one failed junction must not cut a district off.
+- Reserve open sites for big buildings (campus, hospital, solar, airport) in the plan: they never fit later.

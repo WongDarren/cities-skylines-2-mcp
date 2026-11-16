@@ -10,3 +10,9 @@ Domain: progression and land.
 - Dev points: `cs2_dev_tree` then `cs2_buy_dev_node`. Prefer nodes that raise happiness, health, attractiveness, or unlock transport/zero-emission power; never GasPowerPlant. Keep a short ranked wish-list in the report.
 - Land: `cs2_list_map_tiles` (features: buildable, groundwater, fertile, ore, oil, water) and `cs2_buy_map_tiles`. Buy tiles adjacent to the city that a planned district or utility needs; keep ~20 permits in reserve.
 - Report XP, points before/after, nodes bought, tiles bought (centres, cost) and permits left.
+
+Rules of thumb (details in `docs/PLAYBOOK.md`):
+- XP is active (building) plus passive (population x happiness): at scale passive dominates, so quality counts.
+- Spend dev points on what you will place soon: unused unlocks earn nothing.
+- Signature buildings are free: place them as soon as they unlock.
+- Buy tiles only when needed: tile upkeep is heavy.

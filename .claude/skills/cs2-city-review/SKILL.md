@@ -17,6 +17,20 @@ Read first:
 - The current city's memory notes if they are in context (progress log, mayor brief, achievements).
   They hold coordinates of what is built and the open problems; this skill holds none.
 
+## First steps on a new map
+
+Follow [docs/NEW-CITY-CHECKLIST.md](../../../docs/NEW-CITY-CHECKLIST.md) step by step. In short:
+1. **Site analysis:** terrain and contours, water, groundwater, natural resources (keep fertile/ore/oil land
+   free for extraction), outside highway and HV line, likely wind. Map choice is permanent.
+2. **Utilities:** highway link, wind turbines on a utility road, water intake upstream, outlet downstream,
+   all before zoning. Pause while laying roads (new roads add upkeep).
+3. **Road hierarchy:** central Medium arterial toward future interchanges, collectors, 112 m local grid,
+   two entrances per district.
+4. **Deliberate zoning:** only to demand; commercial on busy streets, offices near (not on) arterials,
+   lot sizes chosen for the buildings you want, block ends left unzoned until you pick their frontage.
+Then services as they unlock (small clinic/police, crematorium, parks early), signature buildings at once,
+taxes R/C/I 10–12% and office ≤ 9%, no early loans, Import City Services off.
+
 ## Design rules (agreed with the user)
 
 1. **Real simulation.** Limited money, no `force: true` on locked prefabs or zones. Progress through milestones.
