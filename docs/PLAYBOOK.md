@@ -371,5 +371,16 @@ and TxDOT Roadway Design Manual ch. 15. The user wants interchanges that look an
   column. That's 8 ops per block, and it fills both block faces.
 - `connect` silently splits a long (~240 m) Small Road at its midpoint. Re-read segment ids before
   placing anything roadside.
+- **Very large buildings block lots around them.** After placing an LHC-sized unique building,
+  lots 80–200 m outside its lot failed with OverlapExisting even though nothing showed there. Place
+  huge buildings last, or keep a margin of 100 m or more.
+- **Roadside wind turbines are invisible to `cs2_buildings_near`** but still block placement.
+  `cs2_road_graph allNets` reveals them as building-owned paths.
+- **City policies seem to be milestone-gated, not building-gated.** A prison and a hazardous-waste
+  site did not unlock their policies. Check milestone gating before spending on a building just to
+  unlock a policy.
+- **Housing-heavy expansion causes unemployment.** It reached 20% after several low-density
+  districts. Zone offices or industry with every new residential district (offices are the clean
+  jobs) and watch `cs2_labor`.
 - **Zone names:** use one family consistently (e.g. the `NA ...` zones). Mixing in "Residential
   Low" creates a second, separately counted zone type.
