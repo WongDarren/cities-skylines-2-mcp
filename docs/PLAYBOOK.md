@@ -357,5 +357,19 @@ and TxDOT Roadway Design Manual ch. 15. The user wants interchanges that look an
   - Calling the Shots needs locked policies unlocked first (prison, hazardous-waste site, and so
     on).
   - Districts with policies, signature buildings, parks and trees are cheap wins: do them early.
+- **A stamp reserves a box well beyond its drawn roads.** A SPUI blocked new nodes in a box about
+  500 × 750 m around it. Stubs could only be extended by one straight segment (≤ 200 m) to a
+  junction outside the box. Plan the district grid, the second entrance, pumps and buffers outside
+  that box before placing the stamp. Put the stamp where its arterial stubs point into open land.
+- **Check for rail lines before laying arterials.** Crossing a main line at grade makes level
+  crossings that block traffic and cause accidents. Route arterials over or under it, which needs
+  ramp room on both sides. Rail often runs along coasts and beside highways.
+- A district whose only entrance is an interchange is fragile. Confirm a second link is physically
+  possible (grades under about 8–10%) before committing to the site.
+- **Zoning a 240 x 112 m block without crossing a road.** Lay two lines of zone circles at
+  row + 40 m and row + 72 m. Each line gets 4 circles of r 40, the first one 42 m in from each
+  column. That's 8 ops per block, and it fills both block faces.
+- `connect` silently splits a long (~240 m) Small Road at its midpoint. Re-read segment ids before
+  placing anything roadside.
 - **Zone names:** use one family consistently (e.g. the `NA ...` zones). Mixing in "Residential
   Low" creates a second, separately counted zone type.
