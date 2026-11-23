@@ -382,5 +382,21 @@ and TxDOT Roadway Design Manual ch. 15. The user wants interchanges that look an
 - **Housing-heavy expansion causes unemployment.** It reached 20% after several low-density
   districts. Zone offices or industry with every new residential district (offices are the clean
   jobs) and watch `cs2_labor`.
+- **Large shoreline buildings (e.g. a cargo harbor):** the lot centre sits on the shoreline, so half
+  the lot's depth lies over water. Dry-run `cs2_place_shoreline` and check that every lot corner is
+  inside owned tiles, or it fails with ExceedsCityLimits.
+- **Road for a shoreline building.**
+  - Find the front-edge midpoint: the dry-run position plus (depth / 2) along the direction the
+    building faces land.
+  - Lay the road's centreline one half road-width further landward, parallel to that edge.
+  - Too close fails with OverlapExisting; too far gives NoRoadAccess.
+- **Quays and piers:**
+  - They can't snap to road nodes. Join them with a *curved* Pavement Path, because a straight path
+    into a road node fails with InvalidShape.
+  - A pier deck needs about 5 m or more above the water; start piers from high banks.
+  - Owned-tile edges limit how far out you can build, so a boardwalk parallel to the shore adds pier
+    length efficiently.
+- **Fish farms and offshore oil** come from drawn specialized-industry areas, and the bridge has no
+  tool for those yet.
 - **Zone names:** use one family consistently (e.g. the `NA ...` zones). Mixing in "Residential
   Low" creates a second, separately counted zone type.
