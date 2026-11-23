@@ -398,5 +398,11 @@ and TxDOT Roadway Design Manual ch. 15. The user wants interchanges that look an
     length efficiently.
 - **Fish farms and offshore oil** come from drawn specialized-industry areas, and the bridge has no
   tool for those yet.
-- **Zone names:** use one family consistently (e.g. the `NA ...` zones). Mixing in "Residential
-  Low" creates a second, separately counted zone type.
+- **Zone names: use the regional family only (e.g. `NA ...`).** Generic zones without the regional
+  prefix (`Residential Low`, `Commercial Low`) never grow, even at demand 100. They look zoned but
+  produce no homes or jobs, and once tied up thousands of cells across new districts. Always check
+  occupied vs. empty per zone type with `cs2_zoning`.
+  - `occupied` also counts cells under service buildings, so confirm real growth with
+    `cs2_buildings_near`.
+- **Specialized industry zones (Industrial Oil, Ore and so on) never grow without that natural
+  resource underneath.** Check the tile's features and use Manufacturing otherwise.
