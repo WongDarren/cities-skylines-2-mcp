@@ -69,6 +69,23 @@ as the first road is down; keep coordinates there, not in the repo.
       budget 120%.
 - [ ] Spread garbage capacity (recycling, incinerator) across the city.
 - [ ] Densify near rail stops in 2-row stages; parks within ~400 m of dense housing.
+- [ ] Every interchange follows real-world design (PLAYBOOK §3a):
+      - one-way ramps that leave and join on the right;
+      - off-ramps before the bridge, on-ramps after it;
+      - no lights on the mainline;
+      - service interchanges ~1.5 km apart, with stamps for highway-to-highway junctions.
+- [ ] Plan a ~300 m office/park buffer between industry and homes (industry noise reaches ~250 m).
+- [ ] Keep deathcare and industry out of residential blocks.
+- [ ] Spend development points at every milestone.
+- [ ] Earn cheap achievements early: districts with policies, signature buildings, parks, trees, the loan.
+- [ ] Transit: two or more feeder buses per rail station. Add bus depots as lines grow.
+
+## 7. Very large builds (multiple agents)
+- [ ] Write the master plan first: trunk highway and interchange spacing, land use per region,
+      utility sites, transit, money floor.
+- [ ] One agent per disjoint region. Agents never save or control the sim. Budget and money floor in
+      every prompt (PLAYBOOK §11).
+- [ ] The lead checks each report in the game, then saves, verifies on disk and logs.
 
 ## Every session
 - [ ] One `cs2_city_digest`; fix utilities → warnings → services → demand → budget → traffic.

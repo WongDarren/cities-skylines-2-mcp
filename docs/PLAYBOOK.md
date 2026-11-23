@@ -78,6 +78,52 @@ reworked in patch 1.1.5f1 (Economy 2.0, June 2024) and many web guides predate i
 - Measure over 8–12 in-game hours: `cs2_traffic` flow is a period average. Use `cs2_vehicles`
   queue heads at peak to find the real choke.
 
+### 3a. Real-world freeway design (apply to every interchange)
+
+Distilled from US highway design practice: the FHWA interchange principles (Richard & Lichty), the
+AASHTO Green Book §10.9 (lane balance, basic number of lanes), Caltrans Highway Design Manual ch. 500,
+and TxDOT Roadway Design Manual ch. 15. The user wants interchanges that look and flow like real ones.
+
+- **Ramps are one-way and join on the RIGHT.** Each movement gets its own one-way ramp
+  (`Highway Oneway - 1/2 lanes`): it leaves the carriageway on the right at a shallow angle and
+  joins on the right at a shallow angle. No two-way ramps. No left exits or left entries. No ramp
+  that crosses the opposite carriageway at grade. No traffic lights or junctions on the mainline.
+- **Diamond (the default service interchange), for a highway crossing an arterial:**
+  - **Off-ramps leave BEFORE the bridge:** each direction exits upstream of the crossing street.
+    - Eastbound: SW quadrant.
+    - Westbound: NE quadrant.
+  - **On-ramps join AFTER the bridge:** each direction merges downstream of it.
+    - Westbound: NW quadrant.
+    - Eastbound: SE quadrant.
+  - All four ramp terminals sit on the crossing street, on either side of the bridge. Use lights at
+    the terminals, or roundabouts if they fit.
+  - **Diverge before merge:** exits come before entries, so there is no weave through the
+    interchange.
+  - Reference build: beltway I6 at Bedford St (x≈-1460, z≈850).
+- **Spacing:**
+  - Service interchanges about **1.5 km apart in the city** (US urban "1 mile", which is about
+    1.6 km) and **3 km+ in open country**.
+  - Closer than about 1 km makes the entering and exiting traffic weave and jam. Where two
+    interchanges must be closer, use a **collector-distributor road** (parallel one-way roads that
+    carry the exits and entries) or **braided ramps** (one ramp flies over the other).
+- **Lane balance and basic lanes:**
+  - At a diverge, lanes in = lanes out − 1. At a merge, lanes out = lanes in − 1 at most; never more
+    than one lane dropped at a time.
+  - Keep the through carriageway's basic lane count constant across the interchange, and drop
+    lanes only after the last ramp.
+  - Busy ramps (above about 300 vehicles) get 2 lanes, with a 2-lane exit or merge.
+- **System interchanges (highway to highway):** use stamps, never at-grade.
+  - Trumpet for a T-junction of highways.
+  - Stack, turbine or partial cloverleaf for a full crossing.
+  - Avoid a full **cloverleaf** under heavy load, because its loop ramps weave.
+- **Ramp terminal spacing on the arterial:** keep the next signalised junction about 120–200 m+
+  from a ramp terminal. Give the arterial a median (Large Road Divided) near interchanges so turns
+  don't block through lanes.
+- **Arterial access management:** signals about 400–800 m apart on arterials, and no driveways or
+  small streets within about 100 m of an interchange.
+- **Freeway end:** never end a freeway in a lit T. Taper it into an arterial through a proper
+  terminal, or carry it on to the next interchange.
+
 ## 4. Junction and bridge techniques
 
 - **Roundabouts:** `cs2_place_roundabout` on a junction id from `cs2_road_graph`; pick a size
@@ -238,3 +284,70 @@ reworked in patch 1.1.5f1 (Economy 2.0, June 2024) and many web guides predate i
 - Reward popups pause the game: `cs2_run_simulation` auto-dismisses them, or `cs2_dismiss_popups`.
 - A road that looks like a dead-end stub may be a large building's only access; check before removing.
 - Real simulation: never `force: true`.
+- **Saves can fail silently.** A tiny (~1.4 KB) autosave appearing instead of your named save means
+  it failed. Save again under a new name and `ls` the Saves folder every time.
+- `cs2_demolish` of a ramp can fail with InvalidShape. Workaround: `cs2_replace_road` it to a one-way
+  prefab with `invert` so it becomes a useful ramp, then demolish the leftover stub.
+- Auto-mode permission rules may block `cs2_place_transit_stop` / batch `stop`; reuse existing stops
+  or ask the user to allow the tool.
+
+## 11. Running a big build with parallel agents
+
+- **Plan first, then fan out.** Write a short master plan, then give each agent a disjoint region:
+  - the trunk highway and its interchange spacing;
+  - land use per area: homes upwind, industry downwind on resource tiles, offices as buffers;
+  - where utilities go;
+  - transit;
+  - a money floor.
+
+  Overlapping agents undo each other's work.
+- Every agent prompt includes:
+  - its region bounds, and what the other agents are doing;
+  - "do not save, do not run/pause the sim" (only the lead does that);
+  - a budget, and a city-money floor (e.g. ≥ $40M);
+  - the PLAYBOOK sections that apply (§2 grid, §3/§3a highways);
+  - "ids were renumbered on load, re-read them";
+  - token efficiency: plan, then `cs2_batch` (≤ 60 ops), filtered graph reads, and one audit at
+    the end.
+- **The lead verifies each report in the game** (one targeted check: warnings, queue heads or the
+  road graph) before logging it. Reports can overstate.
+- An agent stopped early leaves partial work, typically roads and zones with no services or
+  transit. Log what's missing and finish it next round.
+- Stop agents cleanly near usage limits. Message each one to leave the network consistent (no
+  half-built ramps), then save and verify on disk.
+
+## 12. Lessons from scaling a 200k city
+
+- **Overpass over a 4-lane highway**, from an existing junction: piece 1 to a free end about 15–30 m
+  short of the highway edge at e≈11. Piece 2 crosses the highway mid-segment at e≈11, with its
+  pillar ≥ 25 m from the highway centreline. Piece 3 lands at e 0. About 8 m clearance passes
+  validation.
+- **Water bodies fail road pieces with InWater.** Build a grid as one piece per node-to-node link, so
+  failures only hit the water cells. Then remove the stubs that are left dead-ending into the water.
+- **Bus depots cap how many buses run.** When lines show 0 vehicles or "No Vehicles" warnings, add
+  BusDepot01 (or its Extra Garage), and trim the vehicle count (60–100%) on short or empty lines.
+- **Spiderwebbing (50 lines):** add short feeders, at least two per subway station, plus 2–4 per new
+  district, instead of empty filler lines.
+- **Smog sources inside housing.** A crematorium inside a high-rise block produced a local
+  air-pollution peak. Deathcare and industry belong outside residential blocks.
+- **Dense industry is noisy.** It produces noise warnings about 250 m into neighbouring homes. Parks
+  do not absorb noise. Keep about 300 m of offices or parks between industry and housing, and plan
+  that buffer up front.
+- **Outside power line, incinerators and batteries:** a TransformerStation01 right beside each, with
+  one short high-voltage hop (`cs2_route_power_line` to go around lots). When an overhead line fails
+  with NotEnoughClearance (plant lot well below the road), use a High-voltage Ground Cable.
+- **Subway yard storage tracks** need their own track link back to the line, or they show
+  No Train Access.
+- **Surface water pumps need deep water.** Shallow marsh lakes don't work. Groundwater pumps on a
+  clean aquifer are the reliable choice.
+- **Desalination** needs a sea shoreline with road access. Check for high-voltage lines and rail
+  along the coast first.
+- **Check development points after every milestone.** Points pile up unspent. Prefer clean or
+  unique unlocks (desalination, research buildings) over polluting ones (gas, coal).
+- **Achievements:**
+  - Take the ≥ $200k loan (The Deep End) while the sim is running.
+  - Calling the Shots needs locked policies unlocked first (prison, hazardous-waste site, and so
+    on).
+  - Districts with policies, signature buildings, parks and trees are cheap wins: do them early.
+- **Zone names:** use one family consistently (e.g. the `NA ...` zones). Mixing in "Residential
+  Low" creates a second, separately counted zone type.

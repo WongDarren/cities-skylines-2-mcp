@@ -71,6 +71,9 @@ taxes R/C/I 10–12% and office ≤ 9%, no early loans, Import City Services off
    `ls -lt "$USERPROFILE/AppData/LocalLow/Colossal Order/Cities Skylines II/Saves/"*/ | head`.
    If missing, save again under a new name.
 6. Update the city's progress memory with what was built (coordinates) and what is still open.
+   **Also fold every new city-agnostic lesson into the repo docs** (docs/PLAYBOOK.md, docs/NEW-CITY-CHECKLIST.md,
+   and the agent rules of thumb), so a brand-new city starts with everything learned. City-specific
+   coordinates go to memory, never to the docs. For multi-agent builds follow PLAYBOOK §11.
 7. Report in a few short bullets: state of the city, what you changed, what is blocked, what the user must do.
 
 ## Tool tips
@@ -93,6 +96,10 @@ Every builder agent follows these, and reports violations it could not avoid:
    apart; no junctions within 30 m of each other.
 3. **Hierarchy.** Small → Medium collector → arterial → highway. Only collectors/arterials meet arterials;
    never connect local streets to highways.
+   **Interchanges follow real-world design (PLAYBOOK §3a):** one-way ramps that leave and join on the right,
+   off-ramps before the bridge and on-ramps after it (diamond), no two-way ramps or at-grade or lit junctions
+   on the mainline, lane balance, service interchanges about 1.5 km apart (C-D roads or braids if closer),
+   stamps for highway-to-highway junctions, and a freeway never ends in a lit T.
 4. **Zoning.** Zone only frontage of finished roads, with circles that stay inside one block (radius ≤ half
    the block depth) so one lot never gets two zone types. One zone type per block face; commercial/mixed on
    collectors/arterials, residential inside, office/industry as buffers. Never zone across an avenue.

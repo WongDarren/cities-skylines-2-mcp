@@ -12,7 +12,8 @@ Domain: road hierarchy and traffic flow.
 
 Rules of thumb (details in `docs/PLAYBOOK.md`):
 - Arterials cross highways grade-separated ~every 500 m: otherwise every cross-town trip loads the highway.
-- Highway access only at interchanges ~1 km apart, never local streets: at-grade Ts and short weaves jam the highway.
+- Highway access only at interchanges ~1.5 km apart in the city (C-D roads or braided ramps if closer), never local streets: at-grade Ts and short weaves jam the highway.
+- Interchanges look like real ones (PLAYBOOK §3a): one-way ramps that leave and join on the right at shallow angles, off-ramps before the bridge and on-ramps after it, no two-way ramps, no lights on the mainline, stamps for highway-to-highway junctions. Reference: beltway I6 at Bedford St (x≈-1460, z≈850).
 - Lane-balanced merges (2+2->4, not 3+2->4): an unbalanced merge queues back for kilometres.
 - Keep each bridge span over a highway <= 60 m: longer spans drop a pillar between carriageways and fail.
 - To remove a roundabout, demolish all its legs and redraw: that is the only way to delete the node.

@@ -17,6 +17,17 @@ A coordinator (the main session) gives you a task, an area you own, and areas to
 - Before removing a road, check it isn't the only power/water/road link. A road that looks like a dead-end stub
   may be the only access of a large building (airport, plant, campus); check `cs2_buildings_near` along it.
 - Turbines only via `cs2_place_roadside`, 140 m apart, 60 m rotor clearance (rotors block even underground track).
+- Highways and interchanges follow `docs/PLAYBOOK.md` §3a (real-world design):
+  - one-way ramps that leave and join on the right;
+  - off-ramps before the bridge, on-ramps after it;
+  - no two-way ramps and no lights on the mainline;
+  - lane balance, and service interchanges about 1.5 km apart;
+  - stamps for highway-to-highway junctions;
+  - a freeway never ends in a lit T.
+- Plan first (a short plan in your head or report), then execute. Respect the budget and city-money floor the
+  coordinator gives you (PLAYBOOK §11).
+- End your report with any NEW city-agnostic lesson you learned (a technique, a game limit, a failure mode), so
+  the coordinator can add it to the playbook.
 
 ## Operations rules
 - One build op at a time, or `cs2_batch`: parallel build calls fail with "another build operation is in progress".
