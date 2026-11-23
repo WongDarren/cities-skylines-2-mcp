@@ -121,6 +121,14 @@ and TxDOT Roadway Design Manual ch. 15. The user wants interchanges that look an
   don't block through lanes.
 - **Arterial access management:** signals about 400–800 m apart on arterials, and no driveways or
   small streets within about 100 m of an interchange.
+- **Two-way highway prefabs (`Highway Twoway`) are a trap.** It's easy to put all four ramps on one
+  side, and then the other direction's exit and entry cross the opposite carriageway at grade.
+  Audit every interchange on a two-way highway: each direction's ramps must sit on its own (right)
+  side. Fix by building the missing right-side ramps, then removing the crossing ones.
+- A lit node on the mainline that resists `nolights`: convert the side road to a highway one-way
+  ramp prefab and the lights drop.
+- Ramp terminals within ~60 m of another lit junction queue. Set the terminal to `nolights` or merge
+  the two junctions into one.
 - **Freeway end:** never end a freeway in a lit T. Taper it into an arterial through a proper
   terminal, or carry it on to the next interchange.
 
