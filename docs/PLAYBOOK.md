@@ -121,6 +121,14 @@ and TxDOT Roadway Design Manual ch. 15. The user wants interchanges that look an
   don't block through lanes.
 - **Arterial access management:** signals about 400–800 m apart on arterials, and no driveways or
   small streets within about 100 m of an interchange.
+- **Two-way highway prefabs (`Highway Twoway`) are a trap.** It's easy to put all four ramps on one
+  side, and then the other direction's exit and entry cross the opposite carriageway at grade.
+  Audit every interchange on a two-way highway: each direction's ramps must sit on its own (right)
+  side. Fix by building the missing right-side ramps, then removing the crossing ones.
+- A lit node on the mainline that resists `nolights`: convert the side road to a highway one-way
+  ramp prefab and the lights drop.
+- Ramp terminals within ~60 m of another lit junction queue. Set the terminal to `nolights` or merge
+  the two junctions into one.
 - **Freeway end:** never end a freeway in a lit T. Taper it into an arterial through a proper
   terminal, or carry it on to the next interchange.
 
@@ -349,5 +357,52 @@ and TxDOT Roadway Design Manual ch. 15. The user wants interchanges that look an
   - Calling the Shots needs locked policies unlocked first (prison, hazardous-waste site, and so
     on).
   - Districts with policies, signature buildings, parks and trees are cheap wins: do them early.
-- **Zone names:** use one family consistently (e.g. the `NA ...` zones). Mixing in "Residential
-  Low" creates a second, separately counted zone type.
+- **A stamp reserves a box well beyond its drawn roads.** A SPUI blocked new nodes in a box about
+  500 × 750 m around it. Stubs could only be extended by one straight segment (≤ 200 m) to a
+  junction outside the box. Plan the district grid, the second entrance, pumps and buffers outside
+  that box before placing the stamp. Put the stamp where its arterial stubs point into open land.
+- **Check for rail lines before laying arterials.** Crossing a main line at grade makes level
+  crossings that block traffic and cause accidents. Route arterials over or under it, which needs
+  ramp room on both sides. Rail often runs along coasts and beside highways.
+- A district whose only entrance is an interchange is fragile. Confirm a second link is physically
+  possible (grades under about 8–10%) before committing to the site.
+- **Zoning a 240 x 112 m block without crossing a road.** Lay two lines of zone circles at
+  row + 40 m and row + 72 m. Each line gets 4 circles of r 40, the first one 42 m in from each
+  column. That's 8 ops per block, and it fills both block faces.
+- `connect` silently splits a long (~240 m) Small Road at its midpoint. Re-read segment ids before
+  placing anything roadside.
+- **Very large buildings block lots around them.** After placing an LHC-sized unique building,
+  lots 80–200 m outside its lot failed with OverlapExisting even though nothing showed there. Place
+  huge buildings last, or keep a margin of 100 m or more.
+- **Roadside wind turbines are invisible to `cs2_buildings_near`** but still block placement.
+  `cs2_road_graph allNets` reveals them as building-owned paths.
+- **City policies seem to be milestone-gated, not building-gated.** A prison and a hazardous-waste
+  site did not unlock their policies. Check milestone gating before spending on a building just to
+  unlock a policy.
+- **Housing-heavy expansion causes unemployment.** It reached 20% after several low-density
+  districts. Zone offices or industry with every new residential district (offices are the clean
+  jobs) and watch `cs2_labor`.
+- **Large shoreline buildings (e.g. a cargo harbor):** the lot centre sits on the shoreline, so half
+  the lot's depth lies over water. Dry-run `cs2_place_shoreline` and check that every lot corner is
+  inside owned tiles, or it fails with ExceedsCityLimits.
+- **Road for a shoreline building.**
+  - Find the front-edge midpoint: the dry-run position plus (depth / 2) along the direction the
+    building faces land.
+  - Lay the road's centreline one half road-width further landward, parallel to that edge.
+  - Too close fails with OverlapExisting; too far gives NoRoadAccess.
+- **Quays and piers:**
+  - They can't snap to road nodes. Join them with a *curved* Pavement Path, because a straight path
+    into a road node fails with InvalidShape.
+  - A pier deck needs about 5 m or more above the water; start piers from high banks.
+  - Owned-tile edges limit how far out you can build, so a boardwalk parallel to the shore adds pier
+    length efficiently.
+- **Fish farms and offshore oil** come from drawn specialized-industry areas, and the bridge has no
+  tool for those yet.
+- **Zone names: use the regional family only (e.g. `NA ...`).** Generic zones without the regional
+  prefix (`Residential Low`, `Commercial Low`) never grow, even at demand 100. They look zoned but
+  produce no homes or jobs, and once tied up thousands of cells across new districts. Always check
+  occupied vs. empty per zone type with `cs2_zoning`.
+  - `occupied` also counts cells under service buildings, so confirm real growth with
+    `cs2_buildings_near`.
+- **Specialized industry zones (Industrial Oil, Ore and so on) never grow without that natural
+  resource underneath.** Check the tile's features and use Manufacturing otherwise.
